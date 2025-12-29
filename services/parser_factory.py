@@ -61,11 +61,15 @@ from parsers.ufpel_parser import UfpelParser
 from parsers.uninter_parser import UninterParser
 from parsers.ufrn_parser import UfrnParser
 from parsers.ufes_parser import UfesParser
+# Nova importação ENAP
+from parsers.enap_parser import ENAPParser
+
 class ParserFactory:
     def __init__(self):
         self._default = GenericParser()
         # Mapeamento URL -> Classe
         self._map = {
+            'repositorio.enap.gov.br': ENAPParser, # Adicionado ENAP
             '.animaeducacao.com.br': UNIFGParser,
             '.ufes.br': UfesParser,
             '.ufrn.br': UfrnParser,
@@ -110,13 +114,10 @@ class ParserFactory:
             ".ucsal.br": UCSALParser,
             ".unipampa.edu.br": UNIPAMPAParser,
             ".fgv.br": FGVParser,
-            ".ufms.br": UFMSParser,
-            ".ufrrj.br": UFRRJParser,
-            ".unioeste.br": UNIOESTEParser,
             ".unisantos.br": UNISANTOSParser,
             ".unifal-mg.edu.br": UNIFALParser,
-            ".fdv.br": FDVParser,          # Caso usem o domínio nominal
-            "191.252.194.60": FDVParser,  # Para capturar o link do exemplo (IP)
+            ".fdv.br": FDVParser,
+            "191.252.194.60": FDVParser,
             "/fdv/": FDVParser,
             ".uninove.br": UninoveParser,
             ".usp.br": USPParser,
@@ -126,52 +127,33 @@ class ParserFactory:
             ".pucgoias.edu.br": PUCGOIASParser,
             ".ufrr.br": UFRRParser,            
             ".unifesp.br": UNIFESPParser,
-            ".hdl.handle.net/11600": UNIFESPParser, # Prefixo Handle da UNIFESP
-            ".deposita.ibict.br": UNIFACSParser, # Mapeia o repositório compartilhado
-            ".unifacs.br": UNIFACSParser,        # Caso usem domínio próprio
+            ".hdl.handle.net/11600": UNIFESPParser,
+            ".deposita.ibict.br": UNIFACSParser,
+            ".unifacs.br": UNIFACSParser,
             ".uel.br": UelParser,
             ".ifro.edu.br": IFROParser,
             '.ufma.br': UfmaParser,
             '.ufsc.br': UfscParser,            
             '.ufg.br': UfgParser,
             '.ufpr.br': UfprParser,
-            '.repositorio.jesuita.org.br': UnisinosParser, # URL comum para Unisinos
+            '.repositorio.jesuita.org.br': UnisinosParser,
             '.unisinos.br': UnisinosParser,                        
         }
 
     def get_parser(self, url, html_content=None):
-        if not url: return self._default
-        
-        # Lógica para o domínio compartilhado da Cruzeiro do Sul
-        if "repositorio.cruzeirodosul.edu.br" in url.lower() and html_content:
-            content_upper = html_content.upper()
-            if "UNIPÊ" in content_upper or "JOÃO PESSOA" in content_upper:
-                from parsers.unipe_parser import UNIPEParser
-                return UNIPEParser()
-            if "UDF" in content_upper or "DISTRITO FEDERAL" in content_upper:
-                from parsers.udf_parser import UDFParser
-                return UDFParser()
-
-        # Lógica padrão por domínio para as demais
-        for domain, parser_cls in self._map.items():
-            if domain in url.lower():
-                return parser_cls()
-        
-        return self._default
         """
         Seleciona o parser adequado com base na URL ou no conteúdo HTML.
-        html_content é necessário para diferenciar IES em domínios compartilhados.
         """
         if not url: 
             return self._default
         
         url_lower = url.lower()
 
-        # --- Lógica para Repositórios Compartilhados (Cruzeiro do Sul) ---
+        # 1. Lógica para Repositórios Compartilhados (Cruzeiro do Sul)
         if "repositorio.cruzeirodosul.edu.br" in url_lower:
-            # Se tivermos o HTML, verificamos termos que identificam a IES
             if html_content:
                 html_upper = html_content.upper()
+                # Diferenciação por termos contidos no HTML das universidades do grupo
                 if "UNIPÊ" in html_upper or "JOÃO PESSOA" in html_upper:
                     from parsers.unipe_parser import UNIPEParser
                     return UNIPEParser()
@@ -179,13 +161,12 @@ class ParserFactory:
                     from parsers.udf_parser import UDFParser
                     return UDFParser()
             
-            # Fallback caso não haja conteúdo: assume UDF ou Generic
+            # Se não identificar sub-instituição, retorna o genérico
             return self._default
 
-        # --- Lógica Padrão por Domínio ---
+        # 2. Lógica Padrão por Domínio (Mapeamento do __init__)
         for domain, parser_cls in self._map.items():
             if domain in url_lower:
                 return parser_cls()
         
         return self._default
-    
