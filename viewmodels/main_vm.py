@@ -11,6 +11,8 @@ from io import StringIO
 from models.db_handler import DatabaseHandler
 from models.web_scraper import WebScraper
 from bs4 import BeautifulSoup
+from services.parser_factory import ParserFactory # Certifique-se de que o caminho está correto
+
 
 class MLStripper(HTMLParser):
 
@@ -30,6 +32,7 @@ class MainViewModel:
 
     def __init__(self):
         self.db = DatabaseHandler()
+        self.factory = ParserFactory() # Inicializa a fábrica de parsers
 
     def _update_step(self, message, callback):
         self.db.log_event(message)
@@ -311,53 +314,43 @@ class MainViewModel:
             return False, msg_erro
         
     def extract_university_info(self, res_id, on_status_change, callback_refresh):
-        """Extrai sigla e nome da universidade do HTML do buscador já salvo."""
+        """Extrai Sigla, Univ e Programa usando a estratégia de Fábrica de Parsers."""
         def task():
             try:
-                html = self.db.get_html_buscador(res_id)
-                if not html:
-                    self._update_step("Erro: HTML do buscador não encontrado. Faça o scrap primeiro.", on_status_change)
+                # 1. Recupera o link e o HTML do repositório (Guia 5)
+                cursor = self.db.conn.cursor()
+                cursor.execute("SELECT link_repositorio, html_repositorio FROM pesquisas_extraidas WHERE id=?", (res_id,))
+                row = cursor.fetchone()
+                
+                if not row or not row[1]:
+                    self._update_step("Erro: HTML do repositório não encontrado (Guia 5).", on_status_change)
                     return
 
-                self._update_step("Analisando metadados da universidade...", on_status_change)
-                soup = BeautifulSoup(html, 'html.parser')
+                link_repo, html_content = row
                 
-                # 1. Extração da Sigla (Baseado no ID oculto comum no VuFind)
-                # Exemplo: <input type="hidden" value="USP_..." class="hiddenId">
-                sigla = "-"
-                id_input = soup.select_one('input.hiddenId')
-                if id_input and id_input.get('value'):
-                    val = id_input.get('value')
-                    if '_' in val:
-                        sigla = val.split('_')[0]
-
-                # 2. Extração do Nome da Universidade
-                # Geralmente encontra-se em tabelas de metadados ou breadcrumbs
-                nome = "-"
-                # Tenta encontrar em linhas de tabela que mencionam Instituição ou universidade
-                for tr in soup.find_all('tr'):
-                    header = tr.find('th')
-                    if header and any(x in header.get_text().lower() for x in ["instituição", "universidade"]):
-                        data = tr.find('td')
-                        if data:
-                            nome = data.get_text(strip=True)
-                            break
+                # 2. Obtém o Parser adequado via Factory
+                self._update_step(f"Selecionando parser para: {link_repo[:40]}...", on_status_change)
+                parser = self.factory.get_parser(link_repo)
                 
-                # Se não achou na tabela, tenta meta tags (comum no BDTD/VuFind)
-                if nome == "-":
-                    meta_univ = soup.find('meta', {'name': 'citation_publisher'})
-                    if meta_univ:
-                        nome = meta_univ.get('content', strip=True)
-
-                self.db.update_univ_data(res_id, sigla, nome)
-                self._update_step(f"Dados da universidade ({sigla}) obtidos!", on_status_change)
+                # 3. Executa a extração usando a lógica específica do parser
+                # O método extract_pure_soup é o padrão definido nos parsers específicos
+                details = parser.extract_pure_soup(html_content, link_repo, on_progress=on_status_change)
+                
+                # 4. Salva no Banco de Dados usando o método que suporta a nova coluna 'programa'
+                self.db.update_parser_data(res_id, details)
+                self._update_step(f"Sucesso: Dados de {details.get('sigla')} extraídos.", on_status_change)
                 
                 if callback_refresh:
                     callback_refresh()
 
             except Exception as e:
-                self.db.log_event(f"Erro ao extrair universidade: {str(e)}")
+                self.db.log_event(f"Erro na extração via Parser: {str(e)}")
                 self._update_step(f"Erro: {str(e)}", on_status_change)
 
         threading.Thread(target=task, daemon=True).start()
         
+#####################################
+
+        
+        
+    

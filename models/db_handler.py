@@ -52,7 +52,10 @@ class DatabaseHandler:
         self.create_tables()
 
     def create_tables(self):
-        """Cria as tabelas necessárias, incluindo colunas para Sigla e Nome da Universidade."""
+        """
+        Cria as tabelas necessárias, garantindo a existência da coluna 'programa' 
+        e das colunas para os conteúdos HTML das Guias 4 e 5.
+        """
         cursor = self.conn.cursor()
         
         # Tabela para os Scraps brutos (Histórico)
@@ -69,7 +72,7 @@ class DatabaseHandler:
             )
         """)
         
-        # Tabela consolidada para Pesquisas Extraídas com as novas colunas
+        # Tabela consolidada para Pesquisas Extraídas com suporte a Parsers e Programa
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS pesquisas_extraidas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,8 +82,9 @@ class DatabaseHandler:
                 link_repositorio TEXT,
                 html_buscador TEXT,    -- Conteúdo para a Guia 4
                 html_repositorio TEXT, -- Conteúdo para a Guia 5
-                sigla_univ TEXT,       -- Coluna para Sigla da IES
-                nome_univ TEXT,        -- Coluna para Nome da Universidade
+                sigla_univ TEXT,       -- Sigla da IES
+                nome_univ TEXT,        -- Nome da Universidade
+                programa TEXT,         -- Nome do Programa de Pós-Graduação
                 parent_rowid INTEGER
             )
         """)
@@ -103,12 +107,15 @@ class DatabaseHandler:
         self.conn.commit()
 
     def get_html_repositorio(self, rowid_pesquisa):
-        """Recupera o HTML do repositório para exibição na quinta guia."""
+        """
+        Recupera o HTML do repositório (Guia 5) para que os Parsers específicos 
+        possam realizar a extração refinada.
+        """
         cursor = self.conn.cursor()
         cursor.execute("SELECT html_repositorio FROM pesquisas_extraidas WHERE id = ?", (rowid_pesquisa,))
         res = cursor.fetchone()
         return res[0] if res else ""
-
+    
     def insert_scrape(self, engine, termo, ano, pagina, html_source, link_busca):
         cursor = self.conn.cursor()
         cursor.execute("""
@@ -137,15 +144,18 @@ class DatabaseHandler:
         return cursor.fetchall()
 
     def fetch_extracted_data(self):
-        """Busca os dados para preencher a tabela na aba 'Pesquisas', incluindo as novas colunas."""
+        """
+        Busca os dados para preencher a tabela na aba 'Pesquisas', 
+        incluindo a nova coluna Programa para exibição na Treeview de 7 colunas.
+        """
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT titulo, autor, link_buscador, link_repositorio, sigla_univ, nome_univ 
+            SELECT titulo, autor, link_buscador, link_repositorio, sigla_univ, nome_univ, programa 
             FROM pesquisas_extraidas 
             ORDER BY id DESC
         """)
         return cursor.fetchall()
-    
+
     def update_html_buscador(self, rowid_pesquisa, html):
         """Atualiza o registro com o HTML da Guia 4."""
         cursor = self.conn.cursor()
@@ -167,5 +177,23 @@ class DatabaseHandler:
             SET sigla_univ = ?, nome_univ = ? 
             WHERE id = ?
         """, (sigla, nome, res_id))
+        self.conn.commit()
+
+    def update_parser_data(self, res_id, data):
+        """
+        Atualiza o registro com os dados refinados (Sigla, Universidade e Programa) 
+        extraídos pela Fábrica de Parsers.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            UPDATE pesquisas_extraidas 
+            SET sigla_univ = ?, nome_univ = ?, programa = ? 
+            WHERE id = ?
+        """, (
+            data.get('sigla', '-'), 
+            data.get('universidade', '-'), 
+            data.get('programa', '-'), 
+            res_id
+        ))
         self.conn.commit()
 
