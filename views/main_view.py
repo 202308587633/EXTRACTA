@@ -39,43 +39,46 @@ class MainView(ctk.CTk):
         self._setup_home_tab()
 
     def _setup_home_tab(self):
-        """Configura a aba Scraper com Comboboxes para preenchimento rápido."""
+        """Configura a aba Scraper com Comboboxes para montagem dinâmica da URL BDTD."""
         container = ctk.CTkFrame(self.tab_home, fg_color="transparent")
         container.pack(expand=True)
 
-        self.label = ctk.CTkLabel(container, text="Parâmetros de Pesquisa (BDTD)", font=("Roboto", 18))
+        self.label = ctk.CTkLabel(container, text="Parâmetros de Pesquisa BDTD", font=("Roboto", 18))
         self.label.pack(pady=(0, 20))
 
-        # --- NOVA SEÇÃO: COMBOBOXES DE PREENCHIMENTO ---
+        # --- SEÇÃO DE COMBOBOXES ---
         combos_frame = ctk.CTkFrame(container, fg_color="transparent")
         combos_frame.pack(fill="x", pady=10)
 
-        # Combobox para Termos
+        # Combobox para Termos (Jurimetria, IA, etc.)
         termos_opcoes = ["jurimetria", "inteligência artificial", "análise de discurso", 
                          "algoritmo", "direito digital", "tecnologia da informação"]
         self.combo_termos = ctk.CTkComboBox(
             combos_frame, 
             values=termos_opcoes,
-            command=self._update_url_entry,
+            command=self._update_url_from_selection,
             width=200
         )
-        self.combo_termos.set("Selecione o Termo")
+        self.combo_termos.set("jurimetria") # Valor inicial conforme exemplo
         self.combo_termos.pack(side="left", padx=5)
 
-        # Combobox para Anos
+        # Combobox para Anos (2020 a 2025)
         anos_opcoes = [str(ano) for ano in range(2020, 2026)]
         self.combo_anos = ctk.CTkComboBox(
             combos_frame, 
             values=anos_opcoes,
-            command=self._update_url_entry,
-            width=150
+            command=self._update_url_from_selection,
+            width=100
         )
-        self.combo_anos.set("Selecione o Ano")
+        self.combo_anos.set("2020") # Valor inicial conforme exemplo
         self.combo_anos.pack(side="left", padx=5)
 
-        # Entrada de Texto Original (URL/Termo final)
-        self.url_entry = ctk.CTkEntry(container, placeholder_text="Termo final ou URL completa", width=400)
+        # Campo de entrada que exibirá a URL montada
+        self.url_entry = ctk.CTkEntry(container, placeholder_text="URL gerada aparecerá aqui", width=600)
         self.url_entry.pack(pady=10)
+
+        # Inicializa o campo com a URL padrão do exemplo
+        self._update_url_from_selection()
 
         self.btn_scrape = ctk.CTkButton(container, text="Iniciar Extração", command=self.on_scrape_click)
         self.btn_scrape.pack(pady=20)
@@ -84,6 +87,7 @@ class MainView(ctk.CTk):
         self.status_frame.pack(pady=10)
         self.status_label = ctk.CTkLabel(self.status_frame, text="Aguardando...", text_color="gray")
         self.status_label.pack(side="left")
+        
         self.btn_logs = ctk.CTkButton(self.status_frame, text="[Ver Logs]", width=60, fg_color="transparent", 
                                       command=self.open_log_viewer, cursor="hand2")
         self.btn_logs.pack(side="left", padx=(5, 0))
@@ -398,26 +402,23 @@ class MainView(ctk.CTk):
     def update_url_roots_list(self):
         """
         Preenche a guia de URLs extraindo domínios únicos em ordem alfabética.
+        Implementado com segurança para evitar o erro AttributeError: scroll_urls.
         """
-        # Proteção para evitar o AttributeError durante a inicialização
         if not hasattr(self, 'scroll_urls'):
             return
 
-        # Obtém domínios únicos via ViewModel (já deve retornar ordenados)
+        # A ViewModel já retorna a lista ordenada via sorted(list(domains))
         domains = self.vm.get_unique_domains()
         
-        # Limpa widgets anteriores
         for widget in self.scroll_urls.winfo_children():
             widget.destroy()
             
         self.domain_vars = {}
         
         if not domains:
-            lbl = ctk.CTkLabel(self.scroll_urls, text="Nenhum link de repositório encontrado na tabela.")
-            lbl.pack(pady=20)
+            ctk.CTkLabel(self.scroll_urls, text="Nenhum domínio identificado.").pack(pady=20)
             return
 
-        # Preenche os checkboxes na ordem alfabética retornada pela VM
         for dom in domains:
             var = tk.BooleanVar(value=True)
             cb = ctk.CTkCheckBox(self.scroll_urls, text=dom, variable=var)
@@ -435,3 +436,35 @@ class MainView(ctk.CTk):
         resultado = f"{termo} {ano}".strip()
         self.url_entry.delete(0, "end")
         self.url_entry.insert(0, resultado)
+
+    def _update_url_from_selection(self, _=None):
+        """
+        Monta a URL da BDTD dinamicamente com base nas seleções de termo e ano.
+        Utiliza o formato solicitado: lookfor0[] para o termo e daterange para o ano.
+        """
+        import urllib.parse
+        
+        termo = self.combo_termos.get()
+        ano = self.combo_anos.get()
+        
+        # Base da URL e parâmetros fixos/dinâmicos
+        base_url = "https://bdtd.ibict.br/vufind/Search/Results"
+        params = [
+            ('join', 'AND'),
+            ('bool0[]', 'AND'),
+            ('lookfor0[]', f'"{termo}"'), # Termo dinâmico entre aspas
+            ('type0[]', 'AllFields'),
+            ('lookfor0[]', 'direito'),    # Filtro fixo solicitado
+            ('type0[]', 'Subject'),
+            ('illustration', '-1'),
+            ('daterange[]', 'publishDate'),
+            ('publishDatefrom', ano),     # Ano dinâmico
+            ('publishDateto', ano)        # Ano dinâmico
+        ]
+        
+        # Constrói a query string garantindo a codificação correta de caracteres como [] e ""
+        query_string = urllib.parse.urlencode(params, safe='[]')
+        full_url = f"{base_url}?{query_string}"
+        
+        self.url_entry.delete(0, "end")
+        self.url_entry.insert(0, full_url)
