@@ -9,6 +9,7 @@ class DatabaseHandler:
     def create_tables(self):
         cursor = self.conn.cursor()
         
+        # Tabela atualizada com a coluna link_busca
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS paginas_busca (
                 engine TEXT,
@@ -16,6 +17,7 @@ class DatabaseHandler:
                 ano TEXT,
                 pagina INTEGER,
                 html_source TEXT,
+                link_busca TEXT,
                 data_coleta TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (engine, termo, ano, pagina)
             )
@@ -31,12 +33,13 @@ class DatabaseHandler:
         
         self.conn.commit()
 
-    def insert_scrape(self, engine, termo, ano, pagina, html_source):
+    def insert_scrape(self, engine, termo, ano, pagina, html_source, link_busca):
         cursor = self.conn.cursor()
+        # Inserção incluindo o novo campo link_busca
         cursor.execute("""
-            INSERT OR REPLACE INTO paginas_busca (engine, termo, ano, pagina, html_source, data_coleta) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (engine, termo, str(ano), pagina, html_source, datetime.now()))
+            INSERT OR REPLACE INTO paginas_busca (engine, termo, ano, pagina, html_source, link_busca, data_coleta) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (engine, termo, str(ano), pagina, html_source, link_busca, datetime.now()))
         self.conn.commit()
 
     def delete_scrape(self, rowid):
@@ -45,7 +48,6 @@ class DatabaseHandler:
         self.conn.commit()
 
     def get_scrape_content_by_id(self, rowid):
-        """Busca apenas o HTML de um registro específico."""
         cursor = self.conn.cursor()
         cursor.execute("SELECT html_source FROM paginas_busca WHERE rowid = ?", (rowid,))
         result = cursor.fetchone()
@@ -74,7 +76,7 @@ class DatabaseHandler:
     def fetch_all(self):
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT rowid, termo, data_coleta, html_source 
+            SELECT rowid, termo, data_coleta, html_source, pagina 
             FROM paginas_busca 
             ORDER BY data_coleta DESC
         """)
@@ -82,3 +84,17 @@ class DatabaseHandler:
 
     def close(self):
         self.conn.close()
+
+    def get_scrape_full_details(self, rowid):
+        """
+        Busca os detalhes completos de um registro para processamento de paginação.
+        Retorna: (engine, termo, ano, pagina, html_source)
+        """
+        cursor = self.conn.cursor()
+        # É fundamental selecionar as colunas na ordem exata esperada pela ViewModel
+        cursor.execute("""
+            SELECT engine, termo, ano, pagina, html_source 
+            FROM paginas_busca 
+            WHERE rowid = ?
+        """, (rowid,))
+        return cursor.fetchone()

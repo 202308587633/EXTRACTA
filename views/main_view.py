@@ -21,8 +21,8 @@ class MainView(ctk.CTk):
         self.tab_home = self.tabview.add("Scraper")
         self.tab_data = self.tabview.add("Histórico")
 
-        self._setup_home_tab()
         self._setup_history_tab()
+        self._setup_home_tab()
 
     def _setup_home_tab(self):
         container = ctk.CTkFrame(self.tab_home, fg_color="transparent")
@@ -75,16 +75,13 @@ class MainView(ctk.CTk):
         self.txt_content = ctk.CTkTextbox(self.content_frame, wrap="word", font=("Consolas", 12))
         self.txt_content.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # --- Configuração do Menu de Contexto ---
+        # O Menu é criado dinamicamente no momento do clique agora
         self.context_menu = tk.Menu(self, tearoff=0)
-        # Adiciona opção de Abrir no Navegador
-        self.context_menu.add_command(label="Abrir no Navegador", command=self.open_current_in_browser)
-        self.context_menu.add_separator()
-        # Adiciona opção de Excluir
-        self.context_menu.add_command(label="Excluir Registro", command=self.delete_current_selection)
         
+        # Variáveis de estado para seleção
         self.selected_row_id = None 
         self.selected_row_termo = None
+        self.selected_row_page = 1
 
         self.load_history_list()
 
@@ -95,7 +92,8 @@ class MainView(ctk.CTk):
 
     def update_status_ui(self, message):
         self.status_label.configure(text=message, text_color=("gray10", "gray90"))
-        if "Processo finalizado" in message:
+        # Verifica se finalizou um processo simples ou de paginação
+        if "finalizado" in message.lower() or "processadas" in message.lower():
             self.btn_scrape.configure(state="normal", text="Iniciar Extração")
             self.url_entry.delete(0, 'end')
             self.load_history_list()
@@ -130,6 +128,7 @@ class MainView(ctk.CTk):
         for widget in self.list_frame.winfo_children():
             widget.destroy()
 
+        # Agora data contém 5 elementos: id, termo, data, html, pagina
         data = self.vm.get_history()
 
         if not data:
@@ -137,8 +136,10 @@ class MainView(ctk.CTk):
             return
 
         for row in data:
-            url_short = row[1].replace("https://", "").replace("http://", "")[:25]
-            display_text = f"{url_short}...\n{str(row[2])[:10]}"
+            # row: 0=id, 1=termo, 2=data, 3=html, 4=pagina
+            url_clean = row[1].replace("https://", "").replace("http://", "")[:20]
+            pagina = row[4]
+            display_text = f"Pág {pagina}: {url_clean}...\n{str(row[2])[:10]}"
             
             btn = ctk.CTkButton(
                 self.list_frame, 
@@ -150,28 +151,45 @@ class MainView(ctk.CTk):
             )
             btn.pack(fill="x", pady=2)
             
-            # Bind do Clique Direito
-            btn.bind("<Button-3>", lambda event, rid=row[0], rtermo=row[1]: self.show_context_menu(event, rid, rtermo))
+            # Passamos row[4] (pagina) para o manipulador do clique direito
+            btn.bind("<Button-3>", lambda event, rid=row[0], rtermo=row[1], rpage=row[4]: self.show_context_menu(event, rid, rtermo, rpage))
 
-    def show_context_menu(self, event, row_id, termo):
-        """Exibe o menu no local do mouse."""
+    def show_context_menu(self, event, row_id, termo, page):
+        """Constrói o menu dinamicamente baseado na página."""
         self.selected_row_id = row_id
         self.selected_row_termo = termo
+        self.selected_row_page = page
+        
+        # Limpa o menu anterior e recria
+        self.context_menu.delete(0, "end")
+        
+        self.context_menu.add_command(label="Abrir no Navegador", command=self.open_current_in_browser)
+        
+        # LÓGICA SOLICITADA: Só exibe se for página 1
+        if self.selected_row_page == 1:
+            self.context_menu.add_command(label="🔍 Buscar Todas as Páginas", command=self.trigger_pagination_scrape)
+        
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Excluir Registro", command=self.delete_current_selection)
+        
         try:
             self.context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.context_menu.grab_release()
 
     def open_current_in_browser(self):
-        """Ação do menu: Abrir no Navegador."""
-        if self.selected_row_id is not None:
+        if self.selected_row_id:
             self.vm.open_in_browser(self.selected_row_id)
 
+    def trigger_pagination_scrape(self):
+        """Inicia a varredura das páginas seguintes."""
+        if self.selected_row_id:
+            # Passa a função de atualização de UI e de Status
+            self.vm.process_pagination(self.selected_row_id, self.update_status_ui, self.load_history_list)
+
     def delete_current_selection(self):
-        """Ação do menu: Excluir."""
-        if self.selected_row_id is not None:
+        if self.selected_row_id:
             self.vm.delete_record(self.selected_row_id, self.selected_row_termo, self.load_history_list)
-            
             self.txt_content.configure(state="normal")
             self.txt_content.delete("0.0", "end")
             self.txt_content.configure(state="disabled")
@@ -183,7 +201,7 @@ class MainView(ctk.CTk):
         self.txt_content.configure(state="normal")
         self.txt_content.delete("0.0", "end")
         
-        header = f"URL: {row_data[1]}\nDATA: {row_data[2]}\n{'-'*60}\n\n"
+        header = f"URL: {row_data[1]}\nPÁGINA: {row_data[4]}\nDATA: {row_data[2]}\n{'-'*60}\n\n"
         self.txt_content.insert("0.0", header + rendered_text)
         
         self.txt_content.configure(state="disabled")
