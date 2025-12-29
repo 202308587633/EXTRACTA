@@ -5,12 +5,13 @@ from parsers.base_parser import BaseParser
 
 class UNIFGParser(BaseParser):
     def __init__(self):
+        # Mantém a identificação original da instituição
         super().__init__(sigla="UNIFG", universidade="Centro Universitário FG")
 
     def extract_pure_soup(self, html_content, url, on_progress=None):
         """
         Extrai dados do repositório da UNIFG (DSpace 9.1 - Rede Ânima).
-        Foca em breadcrumbs e metadados de coleção para identificar o Programa.
+        Otimizado para capturar Programa via Breadcrumbs e PDF via Meta Tags/Links UUID.
         """
         soup = BeautifulSoup(html_content, 'html.parser')
         
@@ -21,83 +22,54 @@ class UNIFGParser(BaseParser):
             'link_pdf': '-'
         }
 
-        if on_progress: on_progress("UNIFG: Analisando estrutura da página (DSpace 9)...")
+        if on_progress: on_progress("UNIFG: A analisar estrutura DSpace 9...")
 
-        # --- 1. EXTRAÇÃO DO PROGRAMA ---
+        # --- 1. EXTRAÇÃO DO PROGRAMA (Breadcrumbs ou Coleções) ---
         try:
-            found_program = None
-            
-            # Estratégia 1: Busca em links de Coleção (Estrutura DSpace 7+)
-            # <div class="collections"><a ...><span>Programa de Pós-Graduação em Direito</span></a></div>
-            collection_divs = soup.find_all('div', class_='collections')
-            for div in collection_divs:
-                a_tag = div.find('a')
-                if a_tag:
-                    text = a_tag.get_text(strip=True)
-                    if "Programa" in text or "Pós-Graduação" in text:
-                        found_program = text
-                        break
+            # No DSpace 9, o programa aparece nos breadcrumbs (penúltimo item)
+            # Ex: Início > UNIFG (BA) > Teses e dissertações > Programa de Pós-Graduação em Direito
+            breadcrumb_items = soup.select('li.breadcrumb-item')
+            if breadcrumb_items and len(breadcrumb_items) >= 2:
+                # O último é o título, o penúltimo costuma ser o programa/coleção
+                prog_text = breadcrumb_items[-2].get_text(strip=True)
+                if "Programa" in prog_text or "Pós-Graduação" in prog_text:
+                    data['programa'] = prog_text
 
-            # Estratégia 2: Breadcrumbs (Trilha de navegação)
-            # <ol class="breadcrumb"> ... <li>Programa de Pós-Graduação em Direito</li> ... </ol>
-            if not found_program:
-                crumbs = soup.select('ol.breadcrumb li')
-                for crumb in crumbs:
-                    text = crumb.get_text(strip=True)
-                    
-                    # Ignora itens genéricos
-                    if text in ["Início", "Teses e dissertações", "UNIFG (BA)"]:
-                        continue
-                    
-                    # Tenta capturar programas
-                    if "Programa de Pós-Graduação" in text or "Mestrado" in text or "Doutorado" in text:
-                        found_program = text
-
-            if found_program:
-                # Limpeza:
-                # Remove "Programa de Pós-Graduação em", "Mestrado em", etc.
-                # Ex: "Programa de Pós-Graduação em Direito" -> "Direito"
-                clean_name = re.sub(
-                    r'^(?:Programa de Pós-Graduação|Mestrado|Doutorado)(?:\s+(?:Profissional|Acadêmico))?(?: em| no| na)?\s*', 
-                    '', 
-                    found_program, 
-                    flags=re.IGNORECASE
-                )
-                
-                data['programa'] = clean_name.strip()
-                if on_progress: on_progress(f"UNIFG: Programa identificado: {data['programa']}")
+            # Alternativa: Busca na div de coleções caso o breadcrumb falhe
+            if data['programa'] == '-':
+                coll_link = soup.find('a', href=re.compile(r'/collections/'))
+                if coll_link:
+                    span = coll_link.find('span')
+                    data['programa'] = span.get_text(strip=True) if span else coll_link.get_text(strip=True)
 
         except Exception as e:
-            if on_progress: on_progress(f"UNIFG: Erro ao extrair programa: {str(e)[:20]}")
+            if on_progress: on_progress(f"UNIFG: Erro no programa: {str(e)[:20]}")
 
-        # --- 2. EXTRAÇÃO DO PDF ---
+        # --- 2. EXTRAÇÃO DO PDF (Meta Tags ou Links de Bitstreams) ---
         try:
-            if on_progress: on_progress("UNIFG: Buscando arquivo PDF...")
-            
             pdf_url = None
             
-            # Estratégia A: Meta Tag citation_pdf_url (Padrão)
-            # O HTML possui: <meta name="citation_pdf_url" content="...">
+            # Estratégia A: Meta Tag citation_pdf_url (Presente no seu HTML)
+            # <meta name="citation_pdf_url" content="https://.../download">
             pdf_meta = soup.find('meta', attrs={'name': 'citation_pdf_url'})
-            if pdf_meta:
+            if pdf_meta and pdf_meta.get('content'):
                 pdf_url = pdf_meta.get('content')
             
-            # Estratégia B: Link na seção de arquivos
+            # Estratégia B: Link físico na página (Padrão DSpace 9 com /bitstreams/)
             if not pdf_url:
-                # Procura links que contenham '/bitstreams/' e '/download'
-                link_tag = soup.find('a', href=lambda h: h and '/bitstreams/' in h and '/download' in h)
-                if link_tag:
-                    pdf_url = link_tag['href']
+                # Procura links que contenham '/bitstreams/' e terminem em '/download'
+                pdf_link_tag = soup.find('a', href=re.compile(r'/bitstreams/.*/download'))
+                if pdf_link_tag:
+                    pdf_url = pdf_link_tag['href']
 
             if pdf_url:
-                # Garante URL absoluta
+                # Resolve a URL absoluta (importante se o link for relativo)
                 data['link_pdf'] = urljoin(url, pdf_url)
-                if on_progress: on_progress("UNIFG: PDF localizado.")
+                if on_progress: on_progress("UNIFG: Link do PDF extraído.")
             else:
-                if on_progress: on_progress("UNIFG: PDF não encontrado diretamente.")
+                if on_progress: on_progress("UNIFG: PDF não localizado.")
 
         except Exception as e:
-            if on_progress: on_progress(f"UNIFG: Erro PDF: {str(e)[:20]}")
+            if on_progress: on_progress(f"UNIFG: Erro no PDF: {str(e)[:20]}")
 
         return data
-    

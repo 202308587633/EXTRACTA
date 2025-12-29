@@ -53,11 +53,15 @@ class MainViewModel:
                 ano = datetime.now().year
 
                 self._update_step(f"Baixando conteúdo de {engine}...", on_status_change)
-                html = WebScraper.fetch_html(full_url)
                 
-                self._update_step("Gravando HTML e link_busca no banco...", on_status_change)
+                # CORREÇÃO: Instancia o scraper e usa download_page
+                scraper = WebScraper()
+                html = scraper.download_page(full_url, on_progress=on_status_change)
                 
-                # O parâmetro full_url é passado para o campo link_busca
+                if not html:
+                    raise Exception("Falha ao capturar o HTML da página inicial.")
+
+                self._update_step("Gravando HTML no banco...", on_status_change)
                 self.db.insert_scrape(
                     engine=engine,
                     termo=full_url,
@@ -66,9 +70,7 @@ class MainViewModel:
                     html_source=html,
                     link_busca=full_url
                 )
-                
                 self._update_step(f"Processo finalizado com sucesso!", on_status_change)
-            
             except Exception as e:
                 erro_msg = str(e)
                 self.db.log_event(f"ERRO: {erro_msg}")
@@ -94,55 +96,35 @@ class MainViewModel:
             return html_content
 
     def process_pagination(self, rowid, on_status_change, callback_refresh):
-        """
-        Lógica para encontrar paginação e raspar páginas seguintes.
-        """
         def task():
             try:
-                # 1. Recuperar o registro original
                 record = self.db.get_scrape_full_details(rowid)
-                if not record:
-                    return
-                
+                if not record: return
                 engine, termo_original, ano, pagina_inicial, html_source = record
                 
-                self._update_step("Analisando HTML para encontrar paginação...", on_status_change)
-
-                # 2. Encontrar o total de páginas no HTML usando Regex
                 matches = re.findall(r'page=(\d+)', html_source)
-                if not matches:
-                    self._update_step("Nenhuma paginação detectada no HTML.", on_status_change)
-                    return
-
+                if not matches: return
                 max_page = max(map(int, matches))
 
-                if max_page <= 1:
-                    self._update_step("Apenas uma página detectada.", on_status_change)
-                    return
-
-                self._update_step(f"Paginação detectada! Total: {max_page} páginas.", on_status_change)
-
-                # 3. Loop de captura
                 parsed_url = urlparse(termo_original)
                 query_params = parse_qs(parsed_url.query)
+                scraper = WebScraper() # Instancia uma vez para o loop
 
                 for p in range(2, max_page + 1):
                     self._update_step(f"Capturando página {p} de {max_page}...", on_status_change)
-                    
                     query_params['page'] = [str(p)]
                     new_query = urlencode(query_params, doseq=True)
                     new_url = urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, 
                                           parsed_url.params, new_query, parsed_url.fragment))
-
-                    time.sleep(1) # Pausa ética
                     
-                    new_html = WebScraper.fetch_html(new_url)
-                    self.db.insert_scrape(engine, termo_original, ano, p, new_html, new_url)
+                    # CORREÇÃO: Usa download_page do scraper instanciado
+                    new_html = scraper.download_page(new_url, on_progress=on_status_change)
+                    if new_html:
+                        self.db.insert_scrape(engine, termo_original, ano, p, new_html, new_url)
+                    time.sleep(1)
 
-                self._update_step(f"Ciclo finalizado. {max_page} páginas processadas.", on_status_change)
-                if callback_refresh:
-                    callback_refresh()
-
+                self._update_step(f"Ciclo finalizado.", on_status_change)
+                if callback_refresh: callback_refresh()
             except Exception as e:
                 self._update_step(f"Erro na paginação: {str(e)}", on_status_change)
 
@@ -222,25 +204,17 @@ class MainViewModel:
         return self.db.fetch_extracted_data()
 
     def scrape_buscador_link(self, pesquisa_id, url, on_status_change, callback_display):
-        """Realiza o scrap do link interno do buscador e salva no BD."""
         def task():
             try:
-                self._update_step(f"Acessando link do buscador: {url[:50]}...", on_status_change)
-                
-                # Usa o WebScraper já implementado para baixar o HTML
-                html = WebScraper.fetch_html(url)
-                
-                # Salva no banco de dados
-                self.db.update_html_buscador(pesquisa_id, html)
-                
-                self._update_step("HTML do buscador salvo com sucesso!", on_status_change)
-                
-                if callback_display:
-                    callback_display(html)
+                self._update_step(f"Acessando buscador: {url[:40]}...", on_status_change)
+                scraper = WebScraper()
+                html = scraper.download_page(url, on_progress=on_status_change) # CORREÇÃO
+                if html:
+                    self.db.update_html_buscador(pesquisa_id, html)
+                    self._update_step("HTML do buscador salvo!", on_status_change)
+                    if callback_display: callback_display(html)
             except Exception as e:
-                self.db.log_event(f"Erro no scrap do buscador: {str(e)}")
                 self._update_step(f"Erro: {str(e)}", on_status_change)
-
         threading.Thread(target=task, daemon=True).start()
 
     def fetch_saved_html_buscador(self, pesquisa_id):
@@ -266,27 +240,18 @@ class MainViewModel:
             return False, f"Erro ao abrir navegador: {str(e)}"
 
     def scrape_repositorio_link(self, pesquisa_id, url, on_status_change, callback_display):
-        """Faz o scrap do link final (repositório) de forma assíncrona."""
         def task():
             try:
-                if not url or url == "-":
-                    self._update_step("Erro: Link do repositório inválido.", on_status_change)
-                    return
-
-                self._update_step(f"Acessando Repositório: {url[:50]}...", on_status_change)
-                
-                # Reutiliza o WebScraper para baixar o HTML do repositório
-                html = WebScraper.fetch_html(url)
-                
-                self.db.update_html_repositorio(pesquisa_id, html)
-                self._update_step("HTML do repositório salvo com sucesso!", on_status_change)
-                
-                if callback_display:
-                    callback_display(html)
+                if not url or url == "-": return
+                self._update_step(f"Acessando Repositório: {url[:40]}...", on_status_change)
+                scraper = WebScraper()
+                html = scraper.download_page(url, on_progress=on_status_change) # CORREÇÃO (Fallback automático p/ Selenium)
+                if html:
+                    self.db.update_html_repositorio(pesquisa_id, html)
+                    self._update_step("HTML do repositório salvo!", on_status_change)
+                    if callback_display: callback_display(html)
             except Exception as e:
-                self.db.log_event(f"Erro no scrap do repositório: {str(e)}")
                 self._update_step(f"Erro no repositório: {str(e)}", on_status_change)
-
         threading.Thread(target=task, daemon=True).start()
         
     def preview_html_content_in_browser(self, html_content):
@@ -315,14 +280,9 @@ class MainViewModel:
             return False, msg_erro
         
     def extract_university_info(self, res_id, on_status_change, callback_refresh):
-        """
-        Extrai Sigla, Univ, Programa e PDF.
-        Tenta primeiro pelo Repositório (Guia 5 - Completo).
-        Se não houver Guia 5, tenta extrair o que for possível do Buscador (Guia 4).
-        """
+        """Extração inteligente com suporte a 8 colunas e Link do PDF."""
         def task():
             try:
-                # 1. Busca os dados atuais no banco
                 cursor = self.db.conn.cursor()
                 cursor.execute("""
                     SELECT link_buscador, html_buscador, link_repositorio, html_repositorio 
@@ -330,36 +290,28 @@ class MainViewModel:
                 """, (res_id,))
                 row = cursor.fetchone()
                 
-                if not row:
-                    self._update_step("Erro: Registro não encontrado.", on_status_change)
-                    return
+                if not row: return
 
                 l_busc, h_busc, l_repo, h_repo = row
                 
-                # 2. Prioridade 1: Extração via Parser (Guia 5 - Repositório)
-                if h_repo and l_repo != "-":
-                    self._update_step(f"Usando Parser para Repositório...", on_status_change)
-                    parser = self.factory.get_parser(l_repo)
-                    details = parser.extract_pure_soup(h_repo, l_repo, on_progress=on_status_change)
-                
-                # 3. Prioridade 2: Extração via Buscador (Guia 4 - Dados básicos)
-                elif h_busc:
-                    self._update_step("Guia 5 ausente. Extraindo dados básicos da Guia 4...", on_status_change)
-                    # Usa o parser genérico para tentar pegar Sigla/Univ do HTML do buscador
-                    parser = self.factory.get_parser(l_busc)
-                    details = parser.extract_pure_soup(h_busc, l_busc, on_progress=on_status_change)
-                    # Nota: Programa e PDF raramente estão na Guia 4, então virão como "-"
-                
-                else:
-                    self._update_step("Erro: Nenhum conteúdo HTML disponível (Guia 4 ou 5).", on_status_change)
+                # Escolhe a melhor fonte disponível
+                source_html = h_repo if h_repo else h_busc
+                active_link = l_repo if h_repo else l_busc
+
+                if not source_html:
+                    self._update_step("Erro: Nenhum HTML capturado. Faça o Scrap primeiro.", on_status_change)
                     return
 
-                # 4. Salva no Banco de Dados (8 colunas via update_parser_data no db_handler)
-                self.db.update_parser_data(res_id, details)
-                self._update_step(f"Sucesso: {details.get('sigla')} processado.", on_status_change)
+                self._update_step(f"Iniciando Parser para {active_link[:30]}...", on_status_change)
+                parser = self.factory.get_parser(active_link, html_content=source_html)
+                # Extrai dados (Sigla, Nome, Programa, PDF)
+                details = parser.extract_pure_soup(source_html, active_link, on_progress=on_status_change)                
                 
-                if callback_refresh:
-                    callback_refresh()
+                # Salva no Banco (certifique-se que o db_handler tem a coluna link_pdf)
+                self.db.update_parser_data(res_id, details)
+                
+                self._update_step(f"Sucesso: {details.get('sigla')} processada.", on_status_change)
+                if callback_refresh: callback_refresh()
 
             except Exception as e:
                 self.db.log_event(f"Erro na extração: {str(e)}")
@@ -379,3 +331,37 @@ class MainViewModel:
             return False, "Link do PDF não disponível. Execute a extração (Parser) primeiro."
         except Exception as e:
             return False, str(e)
+    
+    def perform_repositorio_scrap(self, res_id, on_status_change, callback_refresh):
+        """Usa o WebScraper com fallback automático para Selenium."""
+        def task():
+            try:
+                # 1. Recupera o link do banco
+                cursor = self.db.conn.cursor()
+                cursor.execute("SELECT link_repositorio FROM pesquisas_extraidas WHERE id=?", (res_id,))
+                row = cursor.fetchone()
+                
+                if not row or row[0] == "-":
+                    self._update_step("Erro: Link do repositório inválido.", on_status_change)
+                    return
+
+                url = row[0]
+                
+                # 2. Instancia o scraper e chama o método correto
+                scraper = WebScraper()
+                html_content = scraper.download_page(url, on_progress=on_status_change)
+
+                if html_content:
+                    self.db.update_html_repositorio(res_id, html_content)
+                    self._update_step("Sucesso: HTML do repositório atualizado.", on_status_change)
+                else:
+                    self._update_step("Falha: Não foi possível obter o HTML do repositório.", on_status_change)
+
+                if callback_refresh:
+                    callback_refresh()
+
+            except Exception as e:
+                self.db.log_event(f"Erro no Scrap do Repositório: {str(e)}")
+                self._update_step(f"Erro: {str(e)}", on_status_change)
+
+        threading.Thread(target=task, daemon=True).start()

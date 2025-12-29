@@ -53,12 +53,12 @@ class DatabaseHandler:
 
     def create_tables(self):
         """
-        Cria as tabelas necessárias, garantindo a existência da coluna 'link_pdf'
-        e das colunas para os conteúdos HTML das Guias 4 e 5.
+        Cria as tabelas necessárias para o sistema, garantindo a existência de todas as 
+        colunas para metadados institucionais (Sigla, Universidade, Programa e PDF).
         """
         cursor = self.conn.cursor()
         
-        # Tabela para os Scraps brutos (Histórico)
+        # 1. Tabela para os Scraps brutos (Histórico/Guia 2)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS paginas_busca (
                 engine TEXT,
@@ -72,7 +72,9 @@ class DatabaseHandler:
             )
         """)
         
-        # Tabela consolidada para Pesquisas Extraídas com suporte a PDF e Programa
+        # 2. Tabela consolidada para Pesquisas (Guia 3)
+        # Inclui suporte para as Guias 4 (html_buscador) e 5 (html_repositorio)
+        # Inclui as colunas finais de extração refinada
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS pesquisas_extraidas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,17 +82,17 @@ class DatabaseHandler:
                 autor TEXT,
                 link_buscador TEXT,
                 link_repositorio TEXT,
-                html_buscador TEXT,    -- Conteúdo para a Guia 4
-                html_repositorio TEXT, -- Conteúdo para a Guia 5
+                html_buscador TEXT,    -- Conteúdo HTML da BDTD (Guia 4)
+                html_repositorio TEXT, -- Conteúdo HTML da Instituição (Guia 5)
                 sigla_univ TEXT,       -- Sigla da IES
                 nome_univ TEXT,        -- Nome da Universidade
-                programa TEXT,         -- Nome do Programa de Pós-Graduação
-                link_pdf TEXT,         -- NOVA COLUNA: Link direto para o arquivo PDF
+                programa TEXT,         -- Programa de Pós-Graduação
+                link_pdf TEXT,         -- Link direto para o arquivo PDF
                 parent_rowid INTEGER
             )
         """)
         
-        # Tabela de Logs do Sistema
+        # 3. Tabela de Logs do Sistema
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS system_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +102,7 @@ class DatabaseHandler:
         """)
         
         self.conn.commit()
-    
+
     def update_html_repositorio(self, rowid_pesquisa, html):
         """Salva o HTML capturado do link direto do repositório (Conteúdo da Guia 5)."""
         cursor = self.conn.cursor()
@@ -145,15 +147,12 @@ class DatabaseHandler:
         return cursor.fetchall()
 
     def fetch_extracted_data(self):
-        """
-        Busca os dados para preencher a tabela na aba 'Pesquisas', 
-        incluindo a nova coluna Programa para exibição na Treeview de 7 colunas.
-        """
+        """Retorna exatamente as 8 colunas para a View."""
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT titulo, autor, link_buscador, link_repositorio, sigla_univ, nome_univ, programa 
-            FROM pesquisas_extraidas 
-            ORDER BY id DESC
+            SELECT titulo, autor, link_buscador, link_repositorio, 
+                   sigla_univ, nome_univ, programa, link_pdf 
+            FROM pesquisas_extraidas ORDER BY id DESC
         """)
         return cursor.fetchall()
 
@@ -181,20 +180,14 @@ class DatabaseHandler:
         self.conn.commit()
 
     def update_parser_data(self, res_id, data):
-        """
-        Atualiza o registro com os dados refinados (Sigla, Universidade e Programa) 
-        extraídos pela Fábrica de Parsers.
-        """
+        """Salva o dicionário do Parser (agora incluindo link_pdf)."""
         cursor = self.conn.cursor()
         cursor.execute("""
             UPDATE pesquisas_extraidas 
-            SET sigla_univ = ?, nome_univ = ?, programa = ? 
+            SET sigla_univ = ?, nome_univ = ?, programa = ?, link_pdf = ? 
             WHERE id = ?
         """, (
-            data.get('sigla', '-'), 
-            data.get('universidade', '-'), 
-            data.get('programa', '-'), 
-            res_id
+            data.get('sigla', '-'), data.get('universidade', '-'), 
+            data.get('programa', '-'), data.get('link_pdf', '-'), res_id
         ))
         self.conn.commit()
-

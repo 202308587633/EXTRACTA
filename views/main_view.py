@@ -65,46 +65,44 @@ class MainView(ctk.CTk):
         self.load_history_list()
 
     def _setup_research_tab(self):
+        """Configura a aba de pesquisas e o menu de contexto."""
         self.res_container = ctk.CTkFrame(self.tab_res)
         self.res_container.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # 1. Definição das 8 colunas (Adicionado 'pdf')
+        # Definição das 8 colunas
         cols = ("titulo", "autor", "link_busc", "link_repo", "sigla", "univ", "programa", "pdf")
         self.tree = ttk.Treeview(self.res_container, columns=cols, show="headings")
         
         headers = {
-            "titulo": "Pesquisa", 
-            "autor": "Autor", 
-            "link_busc": "Link Buscador", 
-            "link_repo": "Link Repositório",
-            "sigla": "Sigla", 
-            "univ": "Universidade",
-            "programa": "Programa",
-            "pdf": "Link PDF" # Nova coluna final
+            "titulo": "Pesquisa", "autor": "Autor", "link_busc": "Link Buscador", 
+            "link_repo": "Link Repositório", "sigla": "Sigla", 
+            "univ": "Universidade", "programa": "Programa", "pdf": "Link PDF"
         }
         
-        # Configuração de cabeçalhos com comando de ordenação por clique
         for col, text in headers.items():
             self.tree.heading(col, text=text, command=lambda c=col: self.sort_treeview(c, False))
-            self.tree.column(col, width=110)
+            self.tree.column(col, width=100)
             
         scrollbar = ttk.Scrollbar(self.res_container, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # 2. Menu de Contexto atualizado
+        # --- CRIAÇÃO DO MENU DE CONTEXTO ---
+        # Definimos os labels como variáveis para evitar erros de digitação entre as funções
+        self.LABEL_EXTRACT = "🎓 Extrair Sigla/Univ/Programa/PDF"
+        self.LABEL_PDF = "🌐 Abrir Link PDF no Navegador"
+
         self.research_menu = tk.Menu(self, tearoff=0)
         self.research_menu.add_command(label="📥 Scrap Link Buscador", command=self.trigger_buscador_scrap)
         self.research_menu.add_command(label="🚀 Scrap Link Repositório", command=self.trigger_repositorio_scrap)
         self.research_menu.add_separator()
-        self.research_menu.add_command(label="🎓 Extrair Sigla/Univ/Programa/PDF", command=self.trigger_extract_univ)
+        self.research_menu.add_command(label=self.LABEL_EXTRACT, command=self.trigger_extract_univ)
         self.research_menu.add_separator()
         self.research_menu.add_command(label="📄 Ver HTML Buscador (Guia 4)", command=self.view_saved_buscador_html)
         self.research_menu.add_command(label="📄 Ver HTML Repositório (Guia 5)", command=self.view_saved_repositorio_html)
         self.research_menu.add_separator()
-        self.research_menu.add_command(label="🌐 Abrir HTML Buscador no Navegador", command=lambda: self.open_html_preview("buscador"))
-        self.research_menu.add_command(label="🌐 Abrir HTML Repositório no Navegador", command=lambda: self.open_html_preview("repositorio"))
+        self.research_menu.add_command(label=self.LABEL_PDF, command=self.open_pdf_link)
         
         self.tree.bind("<Button-3>", self.show_research_context_menu)
         self.load_research_data()
@@ -155,14 +153,11 @@ class MainView(ctk.CTk):
             btn.bind("<Button-3>", lambda e, rid=row[0], rt=row[1], rp=row[4]: self.show_context_menu(e, rid, rt, rp))
 
     def load_research_data(self):
-        """Carrega os resultados garantindo a exibição das 8 colunas."""
-        for item in self.tree.get_children(): 
-            self.tree.delete(item)
-        
-        # Obtém os dados (deve retornar 8 campos do banco)
+        """Mapeia as 8 colunas do banco para a tabela."""
+        for item in self.tree.get_children(): self.tree.delete(item)
         data = self.vm.get_research_results() 
         for row in data:
-            # Processa a linha para garantir que valores nulos apareçam como "-"
+            # Garante que todos os 8 campos virem string e trata Nones
             processed_row = [str(val) if val and str(val).strip() != "" else "-" for val in row]
             self.tree.insert("", "end", values=processed_row)
 
@@ -177,24 +172,33 @@ class MainView(ctk.CTk):
         self.context_menu.tk_popup(event.x_root, event.y_root)
 
     def show_research_context_menu(self, event):
+        """Exibe o menu de contexto validando os estados das opções."""
         item = self.tree.identify_row(event.y)
         if item:
             self.tree.selection_set(item)
             res_id = self._get_id_from_selected()
             
-            # Verifica se o buscador já possui HTML salvo (Guia 4)
+            # 1. Verifica conteúdos salvos
             html_busc = self.vm.fetch_saved_html_buscador(res_id)
-            
-            # O Parser refinado prefere o HTML do repositório (Guia 5)
             html_repo = self.vm.db.get_html_repositorio(res_id)
             
-            # Habilita extração se houver algum conteúdo para processar
+            # Habilita extração se houver qualquer HTML disponível
             state_parser = "normal" if (html_busc or html_repo) else "disabled"
-            self.research_menu.entryconfig("🎓 Extrair Sigla/Univ/Programa/PDF", state=state_parser)
             
-            # Configuração dos menus de visualização no navegador
-            self.research_menu.entryconfig("🌐 Abrir HTML Buscador no Navegador", state="normal" if html_busc else "disabled")
-            self.research_menu.entryconfig("🌐 Abrir HTML Repositório no Navegador", state="normal" if html_repo else "disabled")
+            # 2. Verifica se há link de PDF na 8ª coluna (índice 7)
+            values = self.tree.item(item, "values")
+            pdf_link = values[7] if len(values) > 7 else "-"
+            state_pdf = "normal" if (pdf_link and pdf_link != "-") else "disabled"
+
+            # 3. Atualiza o menu usando as variáveis de label para garantir o 'index'
+            try:
+                self.research_menu.entryconfig(self.LABEL_EXTRACT, state=state_parser)
+                self.research_menu.entryconfig(self.LABEL_PDF, state=state_pdf)
+            except tk.TclError:
+                # Fallback caso o label mude por algum motivo: tenta por índice numérico
+                # 0:ScrapB, 1:ScrapR, 2:sep, 3:Extrair, 4:sep, 5:HTMLB, 6:HTMLR, 7:sep, 8:PDF
+                self.research_menu.entryconfig(3, state=state_parser)
+                self.research_menu.entryconfig(8, state=state_pdf)
             
             self.research_menu.tk_popup(event.x_root, event.y_root)
 
@@ -302,3 +306,11 @@ class MainView(ctk.CTk):
         if res_id:
             # Chama a ViewModel para processar os dados institucionais e o link do PDF
             self.vm.extract_university_info(res_id, self.update_status_ui, self.load_research_data)
+
+    def open_pdf_link(self):
+        selected = self.tree.selection()
+        if selected:
+            pdf_url = self.tree.item(selected[0], "values")[7] # 8ª coluna
+            if pdf_url and pdf_url != "-":
+                import webbrowser
+                webbrowser.open(pdf_url)
