@@ -260,3 +260,53 @@ class MainViewModel:
             return True, "Abrindo no navegador..."
         except Exception as e:
             return False, f"Erro ao abrir navegador: {str(e)}"
+
+    def scrape_repositorio_link(self, pesquisa_id, url, on_status_change, callback_display):
+        """Faz o scrap do link final (repositório) de forma assíncrona."""
+        def task():
+            try:
+                if not url or url == "-":
+                    self._update_step("Erro: Link do repositório inválido.", on_status_change)
+                    return
+
+                self._update_step(f"Acessando Repositório: {url[:50]}...", on_status_change)
+                
+                # Reutiliza o WebScraper para baixar o HTML do repositório
+                html = WebScraper.fetch_html(url)
+                
+                self.db.update_html_repositorio(pesquisa_id, html)
+                self._update_step("HTML do repositório salvo com sucesso!", on_status_change)
+                
+                if callback_display:
+                    callback_display(html)
+            except Exception as e:
+                self.db.log_event(f"Erro no scrap do repositório: {str(e)}")
+                self._update_step(f"Erro no repositório: {str(e)}", on_status_change)
+
+        threading.Thread(target=task, daemon=True).start()
+        
+    def preview_html_content_in_browser(self, html_content):
+        """
+        Recebe o conteúdo HTML bruto, salva em arquivo temporário e abre no navegador.
+        """
+        if not html_content:
+            return False, "Nenhum conteúdo HTML disponível para exibir."
+
+        try:
+            # Cria um arquivo temporário que não é removido imediatamente para permitir a leitura pelo navegador
+            fd, path = tempfile.mkstemp(suffix=".html")
+            
+            with os.fdopen(fd, 'w', encoding='utf-8') as tmp:
+                tmp.write(html_content)
+            
+            # Abre o arquivo no navegador padrão do sistema
+            webbrowser.open(f'file://{path}')
+            
+            self.db.log_event("HTML aberto no navegador para pré-visualização.")
+            return True, "Abrindo navegador..."
+
+        except Exception as e:
+            msg_erro = f"Erro ao abrir navegador: {str(e)}"
+            self.db.log_event(msg_erro)
+            return False, msg_erro
+        

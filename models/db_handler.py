@@ -2,19 +2,6 @@ import sqlite3
 from datetime import datetime
 
 class DatabaseHandler:
-        
-    def __init__(self, db_name="database.db"):
-        self.conn = sqlite3.connect(db_name, check_same_thread=False)
-        self.create_tables()
-
-    def insert_scrape(self, engine, termo, ano, pagina, html_source, link_busca):
-        cursor = self.conn.cursor()
-        # Inserção incluindo o novo campo link_busca
-        cursor.execute("""
-            INSERT OR REPLACE INTO paginas_busca (engine, termo, ano, pagina, html_source, link_busca, data_coleta) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (engine, termo, str(ano), pagina, html_source, link_busca, datetime.now()))
-        self.conn.commit()
 
     def delete_scrape(self, rowid):
         cursor = self.conn.cursor()
@@ -49,9 +36,23 @@ class DatabaseHandler:
 
     def close(self):
         self.conn.close()
+        
+    def get_scrape_full_details(self, rowid):
+        """Recupera o conteúdo completo para processar a extração inteligente."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT engine, termo, ano, pagina, html_source 
+            FROM paginas_busca 
+            WHERE rowid = ?
+        """, (rowid,))
+        return cursor.fetchone()
+
+    def __init__(self, db_name="database.db"):
+        self.conn = sqlite3.connect(db_name, check_same_thread=False)
+        self.create_tables()
 
     def create_tables(self):
-        """Cria as tabelas necessárias, incluindo a nova estrutura para pesquisas extraídas."""
+        """Cria as tabelas necessárias, incluindo colunas para HTML do buscador (Guia 4) e repositório (Guia 5)."""
         cursor = self.conn.cursor()
         
         # Tabela para os Scraps brutos (Histórico)
@@ -68,8 +69,7 @@ class DatabaseHandler:
             )
         """)
         
-        # Tabela para as Pesquisas Extraídas (Dados solicitados)
-        # Inclui os dois tipos de links: link_buscador e link_repositorio
+        # Tabela consolidada para Pesquisas Extraídas
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS pesquisas_extraidas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,7 +77,8 @@ class DatabaseHandler:
                 autor TEXT,
                 link_buscador TEXT,
                 link_repositorio TEXT,
-                html_buscador TEXT, -- ESTA COLUMNA DEBE EXISTIR
+                html_buscador TEXT,    -- Conteúdo para a Guia 4
+                html_repositorio TEXT, -- Conteúdo para a Guia 5
                 parent_rowid INTEGER
             )
         """)
@@ -91,22 +92,31 @@ class DatabaseHandler:
             )
         """)
         
-        # Tabela Pesquisas: Adicionado o campo html_buscador
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS pesquisas_extraidas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                titulo TEXT,
-                autor TEXT,
-                link_buscador TEXT,
-                link_repositorio TEXT,
-                html_buscador TEXT, -- NOVO CAMPO
-                parent_rowid INTEGER
-            )
-        """)
         self.conn.commit()
-        
+
+    def update_html_repositorio(self, rowid_pesquisa, html):
+        """Salva o HTML capturado do link direto do repositório (Conteúdo da Guia 5)."""
+        cursor = self.conn.cursor()
+        cursor.execute("UPDATE pesquisas_extraidas SET html_repositorio = ? WHERE id = ?", (html, rowid_pesquisa))
+        self.conn.commit()
+
+    def get_html_repositorio(self, rowid_pesquisa):
+        """Recupera o HTML do repositório para exibição na quinta guia."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT html_repositorio FROM pesquisas_extraidas WHERE id = ?", (rowid_pesquisa,))
+        res = cursor.fetchone()
+        return res[0] if res else ""
+
+    def insert_scrape(self, engine, termo, ano, pagina, html_source, link_busca):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO paginas_busca (engine, termo, ano, pagina, html_source, link_busca, data_coleta) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (engine, termo, str(ano), pagina, html_source, link_busca, datetime.now()))
+        self.conn.commit()
+
     def insert_extracted_data(self, data_list):
-        """Insere os dados refinados extraídos do HTML."""
+        """Insere os dados iniciais extraídos (Título, Autor e Links)."""
         cursor = self.conn.cursor()
         cursor.executemany("""
             INSERT INTO pesquisas_extraidas (titulo, autor, link_buscador, link_repositorio, parent_rowid)
@@ -134,26 +144,17 @@ class DatabaseHandler:
         """)
         return cursor.fetchall()
 
-    def get_scrape_full_details(self, rowid):
-        """Recupera o conteúdo completo para processar a extração inteligente."""
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            SELECT engine, termo, ano, pagina, html_source 
-            FROM paginas_busca 
-            WHERE rowid = ?
-        """, (rowid,))
-        return cursor.fetchone()
-
     def update_html_buscador(self, rowid_pesquisa, html):
-        """Atualiza o registro da pesquisa com o HTML capturado do link do buscador."""
+        """Atualiza o registro com o HTML da Guia 4."""
         cursor = self.conn.cursor()
         cursor.execute("UPDATE pesquisas_extraidas SET html_buscador = ? WHERE id = ?", (html, rowid_pesquisa))
         self.conn.commit()
 
     def get_html_buscador(self, rowid_pesquisa):
-        """Recupera o HTML do buscador armazenado no banco."""
+        """Recupera o HTML para a Guia 4."""
         cursor = self.conn.cursor()
         cursor.execute("SELECT html_buscador FROM pesquisas_extraidas WHERE id = ?", (rowid_pesquisa,))
         res = cursor.fetchone()
         return res[0] if res and res[0] else None
+
     

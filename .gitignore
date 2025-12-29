@@ -1,3 +1,5 @@
+msedgedriver.exe
+
 # Ignorar ambiente virtual (a pasta oculta que criamos)
 .venv/
 venv/
