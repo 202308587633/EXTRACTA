@@ -196,7 +196,12 @@ class DatabaseHandler:
         self.conn.commit()
 
     def get_link_by_id(self, res_id):
-        """Retorna o link_buscador associado ao ID da pesquisa."""
+        """Retorna o link do buscador associado ao ID (necessário para o parser BDTD)."""
         cursor = self.conn.execute("SELECT link_buscador FROM pesquisas_extraidas WHERE id=?", (res_id,))
         row = cursor.fetchone()
         return row[0] if row else None
+
+    def get_all_repository_links(self):
+        """Retorna todos os links de repositório para gerar a lista de raízes de URLs."""
+        cursor = self.conn.execute("SELECT link_repositorio FROM pesquisas_extraidas")
+        return [row[0] for row in cursor.fetchall()]

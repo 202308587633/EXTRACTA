@@ -16,18 +16,24 @@ class MainView(ctk.CTk):
         self.setup_ui()
 
     def setup_ui(self):
-        """Inicializa a interface com as cinco guias."""
+        """
+        Inicializa a interface garantindo que a aba de URLs e seus componentes 
+        existam antes de qualquer carregamento de dados.
+        """
         self.tabview = ctk.CTkTabview(self)
         self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.tab_home = self.tabview.add("Scraper")
         self.tab_data = self.tabview.add("Histórico")
         self.tab_res = self.tabview.add("Pesquisas")
+        self.tab_urls = self.tabview.add("Raízes de URLs") # NOVA GUIA
         self.tab_html_busc = self.tabview.add("Conteúdo Buscador")
         self.tab_html_repo = self.tabview.add("Conteúdo Repositório")
 
+        # ORDEM DE INICIALIZAÇÃO CORRIGIDA: URLs antes de Pesquisas
         self._setup_history_tab()
-        self._setup_research_tab()
+        self._setup_url_roots_tab()    # Inicializa scroll_urls e btn_sync_domains primeiro
+        self._setup_research_tab()     # load_research_data agora pode rodar com segurança
         self._setup_html_buscador_tab()
         self._setup_html_repositorio_tab()
         self._setup_home_tab()
@@ -153,13 +159,17 @@ class MainView(ctk.CTk):
             btn.bind("<Button-3>", lambda e, rid=row[0], rt=row[1], rp=row[4]: self.show_context_menu(e, rid, rt, rp))
 
     def load_research_data(self):
-        """Mapeia as 8 colunas do banco para a tabela."""
-        for item in self.tree.get_children(): self.tree.delete(item)
-        data = self.vm.get_research_results() 
+        """Mapeia as 8 colunas e atualiza a lista de URLs simultaneamente."""
+        for item in self.tree.get_children(): 
+            self.tree.delete(item)
+        
+        data = self.vm.get_research_results()
         for row in data:
-            # Garante que todos os 8 campos virem string e trata Nones
             processed_row = [str(val) if val and str(val).strip() != "" else "-" for val in row]
             self.tree.insert("", "end", values=processed_row)
+            
+        # Atualização simultânea solicitada
+        self.update_url_roots_list()
 
     def show_context_menu(self, event, row_id, termo, page):
         self.selected_row_id, self.selected_row_termo, self.selected_row_page = row_id, termo, page
@@ -173,79 +183,51 @@ class MainView(ctk.CTk):
 
     def show_research_context_menu(self, event):
         """
-        Exibe o menu de contexto validando os estados das opções e 
-        incluindo a extração direta a partir do buscador.
+        Menu de contexto aprimorado: Extração via buscador e visualização no navegador.
         """
         item = self.tree.identify_row(event.y)
         if item:
             self.tree.selection_set(item)
             res_id = self._get_id_from_selected()
             
-            # 1. Recupera estados dos conteúdos para habilitar/desabilitar opções
+            # Estados para habilitar/desabilitar opções
             html_busc = self.vm.fetch_saved_html_buscador(res_id)
             html_repo = self.vm.db.get_html_repositorio(res_id)
             
-            # 2. Obtém o link do PDF/Repositório da 8ª coluna (índice 7)
-            values = self.tree.item(item, "values")
-            pdf_link = values[7] if len(values) > 7 else "-"
-            
-            # 3. Limpa e reconstrói o menu para garantir que a opção do buscador seja contextual
             self.research_menu.delete(0, "end")
             
-            # Opções de Scraping
-            self.research_menu.add_command(label="📥 Scrap Link Buscador", 
-                                          command=self.trigger_buscador_scrap)
-            self.research_menu.add_command(label="🚀 Scrap Link Repositório", 
-                                          command=self.trigger_repositorio_scrap)
-            self.research_menu.add_separator()
-
-            # NOVIDADE: Opção de extração direta do Buscador (BDTD)
-            # Só aparece se o HTML do buscador já tiver sido capturado (Guia 4)
+            # --- SEÇÃO BUSCADOR (BDTD) ---
             if html_busc:
                 self.research_menu.add_command(
-                    label="✨ Obter a partir dos dados do buscador", 
+                    label="✨ Obter dados do buscador (Sigla/Univ)", 
                     command=lambda: self.vm.extract_from_search_engine(res_id, self.update_status_ui, self.load_research_data)
                 )
-                self.research_menu.add_separator()
-
-            # Opção de Extração Completa (via Parsers)
-            state_parser = "normal" if (html_busc or html_repo) else "disabled"
-            self.research_menu.add_command(label=self.LABEL_EXTRACT, 
-                                          command=self.trigger_extract_univ, 
-                                          state=state_parser)
-            self.research_menu.add_separator()
-
-            # Opções de Visualização de HTML
-            self.research_menu.add_command(label="📄 Ver HTML Buscador (Guia 4)", 
-                                          command=self.view_saved_buscador_html,
-                                          state="normal" if html_busc else "disabled")
-            self.research_menu.add_command(label="📄 Ver HTML Repositório (Guia 5)", 
-                                          command=self.view_saved_repositorio_html,
-                                          state="normal" if html_repo else "disabled")
-            self.research_menu.add_separator()
-
-            # --- SEÇÃO DE VISUALIZAÇÃO NO NAVEGADOR (SOLICITADO) ---
+            
             self.research_menu.add_command(
-                label="🌐 Abrir HTML do Buscador no Navegador", 
-                command=lambda: self.vm.open_html_buscador_in_browser(res_id),
+                label="🌐 Abrir HTML Buscador no Navegador", 
+                command=lambda: self.vm.preview_html_content_in_browser(html_busc) if html_busc else None,
                 state="normal" if html_busc else "disabled"
             )
+            self.research_menu.add_separator()
+
+            # --- SEÇÃO REPOSITÓRIO ---
+            self.research_menu.add_command(label=self.LABEL_EXTRACT, command=self.trigger_extract_univ)
+            
             self.research_menu.add_command(
-                label="🌐 Abrir HTML do Repositório no Navegador", 
-                command=lambda: self.vm.open_html_repositorio_in_browser(res_id),
+                label="🌐 Abrir HTML Repositório no Navegador", 
+                command=lambda: self.vm.preview_html_content_in_browser(html_repo) if html_repo else None,
                 state="normal" if html_repo else "disabled"
             )
             self.research_menu.add_separator()
 
-            # Opção de PDF
-            state_pdf = "normal" if (pdf_link and pdf_link != "-") else "disabled"
-            self.research_menu.add_command(label=self.LABEL_PDF, 
-                                          command=self.open_pdf_link, 
-                                          state=state_pdf)
+            # --- LINKS E INTERNO ---
+            self.research_menu.add_command(label="📄 Ver HTML Buscador (Aba)", command=self.view_saved_buscador_html)
+            self.research_menu.add_command(label="📄 Ver HTML Repositório (Aba)", command=self.view_saved_repositorio_html)
+            self.research_menu.add_separator()
+            self.research_menu.add_command(label=self.LABEL_PDF, command=self.open_pdf_link)
             
-            # Exibe o menu na posição do clique
-            self.research_menu.tk_popup(event.x_root, event.y_root)            
-            
+            self.research_menu.tk_popup(event.x_root, event.y_root)
+                        
     def _get_id_from_selected(self):
         selected = self.tree.selection()
         if not selected: return None
@@ -359,3 +341,53 @@ class MainView(ctk.CTk):
                 import webbrowser
                 webbrowser.open(pdf_url)
 
+    def _setup_url_roots_tab(self):
+        """Configura a guia com botão superior e grupo de caixas de seleção."""
+        # Frame para o botão solicitado acima do grupo
+        self.frame_url_actions = ctk.CTkFrame(self.tab_urls, fg_color="transparent")
+        self.frame_url_actions.pack(fill="x", padx=10, pady=5)
+
+        self.btn_sync_domains = ctk.CTkButton(
+            self.frame_url_actions, 
+            text="🔄 Sincronizar Domínios (Ordem Alfabética)", 
+            command=self.update_url_roots_list,
+            width=300
+        )
+        self.btn_sync_domains.pack(pady=10)
+
+        # Grupo de caixas de seleção (Scrollable)
+        self.scroll_urls = ctk.CTkScrollableFrame(
+            self.tab_urls, 
+            label_text="Raízes de URLs Identificadas (Sem Repetição)"
+        )
+        self.scroll_urls.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.domain_vars = {}
+
+    def update_url_roots_list(self):
+        """
+        Preenche a guia de URLs extraindo domínios únicos em ordem alfabética.
+        """
+        # Proteção para evitar o AttributeError durante a inicialização
+        if not hasattr(self, 'scroll_urls'):
+            return
+
+        # Obtém domínios únicos via ViewModel (já deve retornar ordenados)
+        domains = self.vm.get_unique_domains()
+        
+        # Limpa widgets anteriores
+        for widget in self.scroll_urls.winfo_children():
+            widget.destroy()
+            
+        self.domain_vars = {}
+        
+        if not domains:
+            lbl = ctk.CTkLabel(self.scroll_urls, text="Nenhum link de repositório encontrado na tabela.")
+            lbl.pack(pady=20)
+            return
+
+        # Preenche os checkboxes na ordem alfabética retornada pela VM
+        for dom in domains:
+            var = tk.BooleanVar(value=True)
+            cb = ctk.CTkCheckBox(self.scroll_urls, text=dom, variable=var)
+            cb.pack(anchor="w", padx=20, pady=5)
+            self.domain_vars[dom] = var
