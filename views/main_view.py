@@ -26,7 +26,7 @@ class MainView(ctk.CTk):
         self.tab_home = self.tabview.add("Scraper")
         self.tab_data = self.tabview.add("Histórico")
         self.tab_res = self.tabview.add("Pesquisas")
-        self.tab_urls = self.tabview.add("Raízes de URLs") # NOVA GUIA
+        self.tab_urls = self.tabview.add("Raízes de URLs")
         self.tab_html_busc = self.tabview.add("Conteúdo Buscador")
         self.tab_html_repo = self.tabview.add("Conteúdo Repositório")
 
@@ -39,12 +39,44 @@ class MainView(ctk.CTk):
         self._setup_home_tab()
 
     def _setup_home_tab(self):
+        """Configura a aba Scraper com Comboboxes para preenchimento rápido."""
         container = ctk.CTkFrame(self.tab_home, fg_color="transparent")
         container.pack(expand=True)
-        self.label = ctk.CTkLabel(container, text="Insira a URL para extração", font=("Roboto", 18))
-        self.label.pack(pady=(0, 10))
-        self.url_entry = ctk.CTkEntry(container, placeholder_text="ex: python.org", width=400)
+
+        self.label = ctk.CTkLabel(container, text="Parâmetros de Pesquisa (BDTD)", font=("Roboto", 18))
+        self.label.pack(pady=(0, 20))
+
+        # --- NOVA SEÇÃO: COMBOBOXES DE PREENCHIMENTO ---
+        combos_frame = ctk.CTkFrame(container, fg_color="transparent")
+        combos_frame.pack(fill="x", pady=10)
+
+        # Combobox para Termos
+        termos_opcoes = ["jurimetria", "inteligência artificial", "análise de discurso", 
+                         "algoritmo", "direito digital", "tecnologia da informação"]
+        self.combo_termos = ctk.CTkComboBox(
+            combos_frame, 
+            values=termos_opcoes,
+            command=self._update_url_entry,
+            width=200
+        )
+        self.combo_termos.set("Selecione o Termo")
+        self.combo_termos.pack(side="left", padx=5)
+
+        # Combobox para Anos
+        anos_opcoes = [str(ano) for ano in range(2020, 2026)]
+        self.combo_anos = ctk.CTkComboBox(
+            combos_frame, 
+            values=anos_opcoes,
+            command=self._update_url_entry,
+            width=150
+        )
+        self.combo_anos.set("Selecione o Ano")
+        self.combo_anos.pack(side="left", padx=5)
+
+        # Entrada de Texto Original (URL/Termo final)
+        self.url_entry = ctk.CTkEntry(container, placeholder_text="Termo final ou URL completa", width=400)
         self.url_entry.pack(pady=10)
+
         self.btn_scrape = ctk.CTkButton(container, text="Iniciar Extração", command=self.on_scrape_click)
         self.btn_scrape.pack(pady=20)
         
@@ -183,14 +215,14 @@ class MainView(ctk.CTk):
 
     def show_research_context_menu(self, event):
         """
-        Menu de contexto aprimorado: Extração via buscador e visualização no navegador.
+        Menu de contexto aprimorado com extração via buscador e visualização no navegador.
         """
         item = self.tree.identify_row(event.y)
         if item:
             self.tree.selection_set(item)
             res_id = self._get_id_from_selected()
             
-            # Estados para habilitar/desabilitar opções
+            # Estados para habilitar/desabilitar opções baseados no banco
             html_busc = self.vm.fetch_saved_html_buscador(res_id)
             html_repo = self.vm.db.get_html_repositorio(res_id)
             
@@ -391,3 +423,15 @@ class MainView(ctk.CTk):
             cb = ctk.CTkCheckBox(self.scroll_urls, text=dom, variable=var)
             cb.pack(anchor="w", padx=20, pady=5)
             self.domain_vars[dom] = var
+
+    def _update_url_entry(self, _=None):
+        """Atualiza a url_entry com base na seleção das Comboboxes."""
+        termo = self.combo_termos.get()
+        ano = self.combo_anos.get()
+        
+        if termo == "Selecione o Termo": termo = ""
+        if ano == "Selecione o Ano": ano = ""
+        
+        resultado = f"{termo} {ano}".strip()
+        self.url_entry.delete(0, "end")
+        self.url_entry.insert(0, resultado)
