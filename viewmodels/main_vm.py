@@ -10,6 +10,7 @@ from html.parser import HTMLParser
 from io import StringIO
 from models.db_handler import DatabaseHandler
 from models.web_scraper import WebScraper
+from bs4 import BeautifulSoup
 
 class MLStripper(HTMLParser):
 
@@ -25,11 +26,6 @@ class MLStripper(HTMLParser):
 
     def get_data(self):
         return self.text.getvalue()
-
-
-
-
-
 class MainViewModel:
 
     def __init__(self):
@@ -39,7 +35,6 @@ class MainViewModel:
         self.db.log_event(message)
         if callback:
             callback(message)
-
 
     def perform_scrape(self, url, on_status_change, on_error):
         def task():
@@ -78,7 +73,6 @@ class MainViewModel:
 
         threading.Thread(target=task, daemon=True).start()
 
-    # (Outros métodos como delete_record, get_history e render_html_to_text permanecem iguais)
     def get_history(self):
         return self.db.fetch_all()
 
@@ -151,7 +145,6 @@ class MainViewModel:
 
         threading.Thread(target=task, daemon=True).start()
 
-
     def open_in_browser(self, rowid):
         """
         Recupera o HTML do banco, cria um arquivo temporário e abre no navegador padrão.
@@ -174,5 +167,53 @@ class MainViewModel:
 
         except Exception as e:
             self.db.log_event(f"Erro ao abrir navegador: {str(e)}")
-            
-            
+
+    def _find_pattern(self, pattern, text):
+        match = re.search(pattern, text)
+        return match.group(1).strip() if match else None
+   
+    def extract_research_data(self, rowid, on_status_change, on_error, callback_refresh):
+        def task():
+            try:
+                self._update_step("Analisando HTML da página...", on_status_change)
+                record = self.db.get_scrape_full_details(rowid)
+                if not record: return
+                
+                html_content = record[4]
+                soup = BeautifulSoup(html_content, 'html.parser')
+                results = soup.select('.result.card-results')
+
+                extracted_to_db = []
+                for res in results:
+                    # 1. Título e Link do Buscador (dentro da tag h2 > a)
+                    title_tag = res.select_one('h2 a.title')
+                    titulo = title_tag.get_text(strip=True) if title_tag else "-"
+                    link_buscador = title_tag['href'] if title_tag else "-"
+                    if link_buscador.startswith('/'):
+                        link_buscador = "https://bdtd.ibict.br" + link_buscador
+
+                    # 2. Autor (link que contém /Author/ no href)
+                    author_tag = res.select_one('a[href*="/Author/"]')
+                    autor = author_tag.get_text(strip=True) if author_tag else "-"
+
+                    # 3. Link do Repositório (expressão "Acessar documento")
+                    repo_tag = res.find('a', string=lambda s: s and "Acessar documento" in s)
+                    link_repositorio = repo_tag['href'] if repo_tag else "-"
+
+                    extracted_to_db.append((titulo, autor, link_buscador, link_repositorio, rowid))
+
+                if extracted_to_db:
+                    self.db.insert_extracted_data(extracted_to_db)
+                    self._update_step(f"Extraídos {len(extracted_to_db)} itens com sucesso.", on_status_change)
+                
+                if callback_refresh: callback_refresh()
+
+            except Exception as e:
+                self.db.log_event(f"Erro na extração: {str(e)}")
+                if on_error: on_error(str(e))
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def get_research_results(self):
+        return self.db.fetch_extracted_data()
+    

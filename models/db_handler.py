@@ -2,36 +2,10 @@ import sqlite3
 from datetime import datetime
 
 class DatabaseHandler:
+        
     def __init__(self, db_name="database.db"):
         self.conn = sqlite3.connect(db_name, check_same_thread=False)
         self.create_tables()
-
-    def create_tables(self):
-        cursor = self.conn.cursor()
-        
-        # Tabela atualizada com a coluna link_busca
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS paginas_busca (
-                engine TEXT,
-                termo TEXT,
-                ano TEXT,
-                pagina INTEGER,
-                html_source TEXT,
-                link_busca TEXT,
-                data_coleta TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (engine, termo, ano, pagina)
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS system_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        self.conn.commit()
 
     def insert_scrape(self, engine, termo, ano, pagina, html_source, link_busca):
         cursor = self.conn.cursor()
@@ -73,7 +47,62 @@ class DatabaseHandler:
         result = cursor.fetchone()
         return result[0] if result else "Pronto para iniciar."
 
+    def close(self):
+        self.conn.close()
+
+    def create_tables(self):
+        """Cria as tabelas necessárias, incluindo a nova estrutura para pesquisas extraídas."""
+        cursor = self.conn.cursor()
+        
+        # Tabela para os Scraps brutos (Histórico)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS paginas_busca (
+                engine TEXT,
+                termo TEXT,
+                ano TEXT,
+                pagina INTEGER,
+                html_source TEXT,
+                link_busca TEXT,
+                data_coleta TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (engine, termo, ano, pagina)
+            )
+        """)
+        
+        # Tabela para as Pesquisas Extraídas (Dados solicitados)
+        # Inclui os dois tipos de links: link_buscador e link_repositorio
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pesquisas_extraidas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                titulo TEXT,
+                autor TEXT,
+                link_buscador TEXT,
+                link_repositorio TEXT,
+                parent_rowid INTEGER
+            )
+        """)
+        
+        # Tabela de Logs do Sistema
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        self.conn.commit()
+
+    def insert_extracted_data(self, data_list):
+        """Insere os dados refinados extraídos do HTML."""
+        cursor = self.conn.cursor()
+        cursor.executemany("""
+            INSERT INTO pesquisas_extraidas (titulo, autor, link_buscador, link_repositorio, parent_rowid)
+            VALUES (?, ?, ?, ?, ?)
+        """, data_list)
+        self.conn.commit()
+
     def fetch_all(self):
+        """Retorna o histórico de capturas para a aba 'Histórico'."""
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT rowid, termo, data_coleta, html_source, pagina 
@@ -82,19 +111,23 @@ class DatabaseHandler:
         """)
         return cursor.fetchall()
 
-    def close(self):
-        self.conn.close()
+    def fetch_extracted_data(self):
+        """Busca os dados para preencher a tabela na aba 'Pesquisas'."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT titulo, autor, link_buscador, link_repositorio 
+            FROM pesquisas_extraidas 
+            ORDER BY id DESC
+        """)
+        return cursor.fetchall()
 
     def get_scrape_full_details(self, rowid):
-        """
-        Busca os detalhes completos de um registro para processamento de paginação.
-        Retorna: (engine, termo, ano, pagina, html_source)
-        """
+        """Recupera o conteúdo completo para processar a extração inteligente."""
         cursor = self.conn.cursor()
-        # É fundamental selecionar as colunas na ordem exata esperada pela ViewModel
         cursor.execute("""
             SELECT engine, termo, ano, pagina, html_source 
             FROM paginas_busca 
             WHERE rowid = ?
         """, (rowid,))
         return cursor.fetchone()
+    

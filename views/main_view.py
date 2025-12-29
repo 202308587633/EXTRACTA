@@ -1,6 +1,7 @@
 import tkinter as tk
 import customtkinter as ctk
 from viewmodels.main_vm import MainViewModel
+from tkinter import ttk 
 
 class MainView(ctk.CTk):
     def __init__(self):
@@ -13,16 +14,6 @@ class MainView(ctk.CTk):
 
         self.vm = MainViewModel()
         self.setup_ui()
-
-    def setup_ui(self):
-        self.tabview = ctk.CTkTabview(self)
-        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.tab_home = self.tabview.add("Scraper")
-        self.tab_data = self.tabview.add("Histórico")
-
-        self._setup_history_tab()
-        self._setup_home_tab()
 
     def _setup_home_tab(self):
         container = ctk.CTkFrame(self.tab_home, fg_color="transparent")
@@ -154,29 +145,6 @@ class MainView(ctk.CTk):
             # Passamos row[4] (pagina) para o manipulador do clique direito
             btn.bind("<Button-3>", lambda event, rid=row[0], rtermo=row[1], rpage=row[4]: self.show_context_menu(event, rid, rtermo, rpage))
 
-    def show_context_menu(self, event, row_id, termo, page):
-        """Constrói o menu dinamicamente baseado na página."""
-        self.selected_row_id = row_id
-        self.selected_row_termo = termo
-        self.selected_row_page = page
-        
-        # Limpa o menu anterior e recria
-        self.context_menu.delete(0, "end")
-        
-        self.context_menu.add_command(label="Abrir no Navegador", command=self.open_current_in_browser)
-        
-        # LÓGICA SOLICITADA: Só exibe se for página 1
-        if self.selected_row_page == 1:
-            self.context_menu.add_command(label="🔍 Buscar Todas as Páginas", command=self.trigger_pagination_scrape)
-        
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="Excluir Registro", command=self.delete_current_selection)
-        
-        try:
-            self.context_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            self.context_menu.grab_release()
-
     def open_current_in_browser(self):
         if self.selected_row_id:
             self.vm.open_in_browser(self.selected_row_id)
@@ -205,3 +173,73 @@ class MainView(ctk.CTk):
         self.txt_content.insert("0.0", header + rendered_text)
         
         self.txt_content.configure(state="disabled")
+  
+    def sort_treeview(self, col, reverse):
+        """Ordena a tabela ao clicar no título da coluna."""
+        l = [(self.tree.set(k, col), k) for k in self.tree.get_children('')]
+        l.sort(reverse=reverse)
+        for index, (val, k) in enumerate(l):
+            self.tree.move(k, '', index)
+        self.tree.heading(col, command=lambda: self.sort_treeview(col, not reverse))
+
+    def show_context_menu(self, event, row_id, termo, page):
+        self.selected_row_id = row_id
+        self.selected_row_termo = termo
+        self.selected_row_page = page
+        
+        self.context_menu.delete(0, "end")
+        self.context_menu.add_command(label="Abrir no Navegador", command=self.open_current_in_browser)
+        
+        # Opção para disparar a extração inteligente
+        self.context_menu.add_command(label="📊 Extrair Dados de Pesquisa", command=self.trigger_extraction)
+        
+        if self.selected_row_page == 1:
+            self.context_menu.add_command(label="🔍 Buscar Todas as Páginas", command=self.trigger_pagination_scrape)
+        
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Excluir Registro", command=self.delete_current_selection)
+        
+        try:
+            self.context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.context_menu.grab_release()
+    
+    def setup_ui(self):
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
+        self.tab_home = self.tabview.add("Scraper")
+        self.tab_data = self.tabview.add("Histórico")
+        self.tab_res = self.tabview.add("Pesquisas")
+
+        self._setup_history_tab()
+        self._setup_research_tab()
+        self._setup_home_tab()
+
+    def _setup_research_tab(self):
+        self.res_container = ctk.CTkFrame(self.tab_res)
+        self.res_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        cols = ("titulo", "autor", "link_busc", "link_repo")
+        self.tree = ttk.Treeview(self.res_container, columns=cols, show="headings")
+        
+        headers = {"titulo": "Pesquisa", "autor": "Autor", "link_busc": "Link Buscador", "link_repo": "Link Repositório"}
+        for col, text in headers.items():
+            self.tree.heading(col, text=text, command=lambda c=col: self.sort_treeview(c, False))
+            self.tree.column(col, width=150)
+
+        scrollbar = ttk.Scrollbar(self.res_container, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscroll=scrollbar.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self.load_research_data()
+
+    def load_research_data(self):
+        for item in self.tree.get_children(): self.tree.delete(item)
+        data = self.vm.get_research_results()
+        for row in data:
+            self.tree.insert("", "end", values=row)
+
+    def trigger_extraction(self):
+        if self.selected_row_id:
+            self.vm.extract_research_data(self.selected_row_id, self.update_status_ui, self.on_error, self.load_research_data)
+
