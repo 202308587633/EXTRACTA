@@ -310,3 +310,54 @@ class MainViewModel:
             self.db.log_event(msg_erro)
             return False, msg_erro
         
+    def extract_university_info(self, res_id, on_status_change, callback_refresh):
+        """Extrai sigla e nome da universidade do HTML do buscador já salvo."""
+        def task():
+            try:
+                html = self.db.get_html_buscador(res_id)
+                if not html:
+                    self._update_step("Erro: HTML do buscador não encontrado. Faça o scrap primeiro.", on_status_change)
+                    return
+
+                self._update_step("Analisando metadados da universidade...", on_status_change)
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # 1. Extração da Sigla (Baseado no ID oculto comum no VuFind)
+                # Exemplo: <input type="hidden" value="USP_..." class="hiddenId">
+                sigla = "-"
+                id_input = soup.select_one('input.hiddenId')
+                if id_input and id_input.get('value'):
+                    val = id_input.get('value')
+                    if '_' in val:
+                        sigla = val.split('_')[0]
+
+                # 2. Extração do Nome da Universidade
+                # Geralmente encontra-se em tabelas de metadados ou breadcrumbs
+                nome = "-"
+                # Tenta encontrar em linhas de tabela que mencionam Instituição ou universidade
+                for tr in soup.find_all('tr'):
+                    header = tr.find('th')
+                    if header and any(x in header.get_text().lower() for x in ["instituição", "universidade"]):
+                        data = tr.find('td')
+                        if data:
+                            nome = data.get_text(strip=True)
+                            break
+                
+                # Se não achou na tabela, tenta meta tags (comum no BDTD/VuFind)
+                if nome == "-":
+                    meta_univ = soup.find('meta', {'name': 'citation_publisher'})
+                    if meta_univ:
+                        nome = meta_univ.get('content', strip=True)
+
+                self.db.update_univ_data(res_id, sigla, nome)
+                self._update_step(f"Dados da universidade ({sigla}) obtidos!", on_status_change)
+                
+                if callback_refresh:
+                    callback_refresh()
+
+            except Exception as e:
+                self.db.log_event(f"Erro ao extrair universidade: {str(e)}")
+                self._update_step(f"Erro: {str(e)}", on_status_change)
+
+        threading.Thread(target=task, daemon=True).start()
+        

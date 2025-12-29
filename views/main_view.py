@@ -68,10 +68,18 @@ class MainView(ctk.CTk):
         self.res_container = ctk.CTkFrame(self.tab_res)
         self.res_container.pack(fill="both", expand=True, padx=10, pady=10)
         
-        cols = ("titulo", "autor", "link_busc", "link_repo")
+        # Colunas atualizadas para incluir Sigla e Universidade
+        cols = ("titulo", "autor", "link_busc", "link_repo", "sigla", "univ")
         self.tree = ttk.Treeview(self.res_container, columns=cols, show="headings")
         
-        headers = {"titulo": "Pesquisa", "autor": "Autor", "link_busc": "Link Buscador", "link_repo": "Link Repositório"}
+        headers = {
+            "titulo": "Pesquisa", 
+            "autor": "Autor", 
+            "link_busc": "Link Buscador", 
+            "link_repo": "Link Repositório",
+            "sigla": "Sigla IES", 
+            "univ": "Universidade"
+        }
         
         # Configuração de cabeçalhos com comando de ordenação por clique
         for col, text in headers.items():
@@ -80,16 +88,17 @@ class MainView(ctk.CTk):
                 text=text, 
                 command=lambda c=col: self.sort_treeview(c, False)
             )
-            self.tree.column(col, width=150)
+            self.tree.column(col, width=120)
             
         scrollbar = ttk.Scrollbar(self.res_container, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # Menu de Contexto (Mantido do seu código original)
+        # Menu de Contexto Aprimorado
         self.research_menu = tk.Menu(self, tearoff=0)
         self.research_menu.add_command(label="📥 Scrap Link Buscador", command=self.trigger_buscador_scrap)
+        self.research_menu.add_command(label="🎓 Obter Dados da Universidade", command=self.trigger_extract_univ) # Nova Opção
         self.research_menu.add_command(label="🚀 Scrap Link Repositório", command=self.trigger_repositorio_scrap)
         self.research_menu.add_separator()
         self.research_menu.add_command(label="📄 Ver HTML Buscador (Guia 4)", command=self.view_saved_buscador_html)
@@ -100,7 +109,7 @@ class MainView(ctk.CTk):
         
         self.tree.bind("<Button-3>", self.show_research_context_menu)
         self.load_research_data()
-        
+
     def _setup_html_buscador_tab(self):
         self.txt_html_busc = ctk.CTkTextbox(self.tab_html_busc, wrap="none", font=("Consolas", 12))
         self.txt_html_busc.pack(fill="both", expand=True, padx=10, pady=10)
@@ -148,9 +157,15 @@ class MainView(ctk.CTk):
             btn.bind("<Button-3>", lambda e, rid=row[0], rt=row[1], rp=row[4]: self.show_context_menu(e, rid, rt, rp))
 
     def load_research_data(self):
-        for item in self.tree.get_children(): self.tree.delete(item)
+        """Carrega os resultados incluindo as colunas de universidade (Sigla e Nome)."""
+        for item in self.tree.get_children(): 
+            self.tree.delete(item)
+        
         data = self.vm.get_research_results()
-        for row in data: self.tree.insert("", "end", values=row)
+        for row in data:
+            # Garante que campos vazios ou None apareçam como "-" para não quebrar a tabela
+            processed_row = [str(val) if val and str(val).strip() != "" else "-" for val in row]
+            self.tree.insert("", "end", values=processed_row)
 
     # --- Menus de Contexto e Ações ---
     def show_context_menu(self, event, row_id, termo, page):
@@ -169,18 +184,21 @@ class MainView(ctk.CTk):
             self.tree.selection_set(item)
             res_id = self._get_id_from_selected()
             
-            # Validação: Só habilita scrap do repositório se o buscador já tiver HTML
+            # Verifica se o buscador já possui HTML salvo
             html_busc = self.vm.fetch_saved_html_buscador(res_id)
-            state_repo = "normal" if html_busc else "disabled"
-            self.research_menu.entryconfig("🚀 Scrap Link Repositório", state=state_repo)
+            state_dependent = "normal" if html_busc else "disabled"
             
-            # Validação Navegador: Só habilita se houver conteúdo salvo
+            # Aplica o estado aos menus que dependem do HTML do buscador
+            self.research_menu.entryconfig("🎓 Obter Dados da Universidade", state=state_dependent)
+            self.research_menu.entryconfig("🚀 Scrap Link Repositório", state=state_dependent)
+            
+            # Validação Navegador
             html_repo = self.vm.db.get_html_repositorio(res_id)
             self.research_menu.entryconfig("🌐 Abrir HTML Buscador no Navegador", state="normal" if html_busc else "disabled")
             self.research_menu.entryconfig("🌐 Abrir HTML Repositório no Navegador", state="normal" if html_repo else "disabled")
             
             self.research_menu.tk_popup(event.x_root, event.y_root)
-
+            
     def _get_id_from_selected(self):
         selected = self.tree.selection()
         if not selected: return None
@@ -280,3 +298,11 @@ class MainView(ctk.CTk):
 
         # Inverte o comportamento para o próximo clique (Alternar entre A-Z e Z-A)
         self.tree.heading(col, command=lambda: self.sort_treeview(col, not reverse))
+        
+    def trigger_extract_univ(self):
+        """Inicia a extração de sigla e nome da universidade através da ViewModel."""
+        res_id = self._get_id_from_selected()
+        if res_id:
+            # Certifique-se de que extract_university_info existe na sua MainViewModel
+            self.vm.extract_university_info(res_id, self.update_status_ui, self.load_research_data)
+  

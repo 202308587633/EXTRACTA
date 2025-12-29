@@ -52,7 +52,7 @@ class DatabaseHandler:
         self.create_tables()
 
     def create_tables(self):
-        """Cria as tabelas necessárias, incluindo colunas para HTML do buscador (Guia 4) e repositório (Guia 5)."""
+        """Cria as tabelas necessárias, incluindo colunas para Sigla e Nome da Universidade."""
         cursor = self.conn.cursor()
         
         # Tabela para os Scraps brutos (Histórico)
@@ -69,7 +69,7 @@ class DatabaseHandler:
             )
         """)
         
-        # Tabela consolidada para Pesquisas Extraídas
+        # Tabela consolidada para Pesquisas Extraídas com as novas colunas
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS pesquisas_extraidas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,6 +79,8 @@ class DatabaseHandler:
                 link_repositorio TEXT,
                 html_buscador TEXT,    -- Conteúdo para a Guia 4
                 html_repositorio TEXT, -- Conteúdo para a Guia 5
+                sigla_univ TEXT,       -- Coluna para Sigla da IES
+                nome_univ TEXT,        -- Coluna para Nome da Universidade
                 parent_rowid INTEGER
             )
         """)
@@ -135,15 +137,15 @@ class DatabaseHandler:
         return cursor.fetchall()
 
     def fetch_extracted_data(self):
-        """Busca os dados para preencher a tabela na aba 'Pesquisas'."""
+        """Busca os dados para preencher a tabela na aba 'Pesquisas', incluindo as novas colunas."""
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT titulo, autor, link_buscador, link_repositorio 
+            SELECT titulo, autor, link_buscador, link_repositorio, sigla_univ, nome_univ 
             FROM pesquisas_extraidas 
             ORDER BY id DESC
         """)
         return cursor.fetchall()
-
+    
     def update_html_buscador(self, rowid_pesquisa, html):
         """Atualiza o registro com o HTML da Guia 4."""
         cursor = self.conn.cursor()
@@ -157,4 +159,13 @@ class DatabaseHandler:
         res = cursor.fetchone()
         return res[0] if res and res[0] else None
 
-    
+    def update_univ_data(self, res_id, sigla, nome):
+        """Atualiza a sigla e o nome da universidade no banco de dados."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            UPDATE pesquisas_extraidas 
+            SET sigla_univ = ?, nome_univ = ? 
+            WHERE id = ?
+        """, (sigla, nome, res_id))
+        self.conn.commit()
+
