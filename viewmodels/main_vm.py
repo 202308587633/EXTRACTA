@@ -425,31 +425,28 @@ class MainViewModel:
             print(f"Erro ao abrir HTML no navegador: {e}")
 
     def get_unique_domains(self):
-        """Retorna uma lista de domínios únicos das pesquisas para preencher as checkboxes."""
-        links = self.db.get_all_repository_links() # Você deve criar esse método no db_handler
-        domains = set()
-        for link in links:
-            if link and link != "-":
-                domain = urlparse(link).netloc
-                if domain: domains.add(domain)
-        return sorted(list(domains))
+        """Retorna lista de domínios únicos ordenados alfabeticamente."""
+        try:
+            links = self.db.get_all_repository_links()
+            domains = set()
+            for link in links:
+                if link and link != "-":
+                    domain = urlparse(link).netloc
+                    if domain: domains.add(domain)
+            return sorted(list(domains)) # ORDEM ALFABÉTICA SOLICITADA
+        except Exception as e:
+            self.db.log_event(f"Erro ao obter domínios: {e}")
+            return []
 
     def open_html_in_browser(self, res_id, source="buscador"):
-        """Cria um arquivo temporário e abre o HTML salvo no navegador padrão."""
-        if source == "buscador":
-            html = self.db.get_html_buscador(res_id)
-        else:
-            html = self.db.get_html_repositorio(res_id)
-            
-        if not html:
-            return False
-
+        """Recupera o HTML do banco e abre no navegador via arquivo temporário."""
+        html = self.db.get_html_buscador(res_id) if source == "buscador" else self.db.get_html_repositorio(res_id)
+        if not html: return False
+        
         try:
             with tempfile.NamedTemporaryFile('w', delete=False, suffix='.html', encoding='utf-8') as f:
                 f.write(html)
                 temp_path = f.name
             webbrowser.open(f"file://{os.path.abspath(temp_path)}")
             return True
-        except Exception as e:
-            print(f"Erro ao abrir navegador: {e}")
-            return False
+        except Exception: return False

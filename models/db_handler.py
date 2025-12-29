@@ -99,8 +99,10 @@ class DatabaseHandler:
                 message TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+        """)        
         
+        self.conn.execute('''CREATE TABLE IF NOT EXISTS dominios_filtros 
+                             (dominio TEXT PRIMARY KEY, ativo INTEGER)''')
         self.conn.commit()
 
     def update_html_repositorio(self, rowid_pesquisa, html):
@@ -196,12 +198,24 @@ class DatabaseHandler:
         self.conn.commit()
 
     def get_link_by_id(self, res_id):
-        """Retorna o link do buscador associado ao ID (necessário para o parser BDTD)."""
+        """Retorna o link_buscador associado ao ID da pesquisa."""
         cursor = self.conn.execute("SELECT link_buscador FROM pesquisas_extraidas WHERE id=?", (res_id,))
         row = cursor.fetchone()
         return row[0] if row else None
 
     def get_all_repository_links(self):
-        """Retorna todos os links de repositório para gerar a lista de raízes de URLs."""
+        """Retorna todos os links de repositório para gerar a lista de raízes."""
         cursor = self.conn.execute("SELECT link_repositorio FROM pesquisas_extraidas")
         return [row[0] for row in cursor.fetchall()]
+
+    def save_domain_state(self, domain, is_active):
+        """Salva ou atualiza o estado de um domínio (1=marcado, 0=desmarcado)."""
+        status = 1 if is_active else 0
+        self.conn.execute("INSERT OR REPLACE INTO dominios_filtros (dominio, ativo) VALUES (?, ?)", 
+                         (domain, status))
+        self.conn.commit()
+
+    def get_domain_states(self):
+        """Retorna dicionário mapeando domínio ao seu estado booleano salvo."""
+        cursor = self.conn.execute("SELECT dominio, ativo FROM dominios_filtros")
+        return {row[0]: bool(row[1]) for row in cursor.fetchall()}

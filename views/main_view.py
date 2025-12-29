@@ -26,13 +26,13 @@ class MainView(ctk.CTk):
         self.tab_home = self.tabview.add("Scraper")
         self.tab_data = self.tabview.add("Histórico")
         self.tab_res = self.tabview.add("Pesquisas")
-        self.tab_urls = self.tabview.add("Raízes de URLs")
+        self.tab_urls = self.tabview.add("Raízes de URLs") # Nova Guia
         self.tab_html_busc = self.tabview.add("Conteúdo Buscador")
         self.tab_html_repo = self.tabview.add("Conteúdo Repositório")
 
-        # ORDEM DE INICIALIZAÇÃO CORRIGIDA: URLs antes de Pesquisas
+        # ORDEM DE INICIALIZAÇÃO CORRIGIDA: URL Roots antes de Pesquisas
         self._setup_history_tab()
-        self._setup_url_roots_tab()    # Inicializa scroll_urls e btn_sync_domains primeiro
+        self._setup_url_roots_tab()    # Inicializa scroll_urls primeiro
         self._setup_research_tab()     # load_research_data agora pode rodar com segurança
         self._setup_html_buscador_tab()
         self._setup_html_repositorio_tab()
@@ -46,11 +46,11 @@ class MainView(ctk.CTk):
         self.label = ctk.CTkLabel(container, text="Parâmetros de Pesquisa BDTD", font=("Roboto", 18))
         self.label.pack(pady=(0, 20))
 
-        # --- SEÇÃO DE COMBOBOXES ---
+        # --- SEÇÃO DE COMBOBOXES SOLICITADAS ---
         combos_frame = ctk.CTkFrame(container, fg_color="transparent")
         combos_frame.pack(fill="x", pady=10)
 
-        # Combobox para Termos (Jurimetria, IA, etc.)
+        # 1. Combobox para Termos
         termos_opcoes = ["jurimetria", "inteligência artificial", "análise de discurso", 
                          "algoritmo", "direito digital", "tecnologia da informação"]
         self.combo_termos = ctk.CTkComboBox(
@@ -59,10 +59,10 @@ class MainView(ctk.CTk):
             command=self._update_url_from_selection,
             width=200
         )
-        self.combo_termos.set("jurimetria") # Valor inicial conforme exemplo
+        self.combo_termos.set("jurimetria")
         self.combo_termos.pack(side="left", padx=5)
 
-        # Combobox para Anos (2020 a 2025)
+        # 2. Combobox para Anos (2020 a 2025)
         anos_opcoes = [str(ano) for ano in range(2020, 2026)]
         self.combo_anos = ctk.CTkComboBox(
             combos_frame, 
@@ -70,27 +70,17 @@ class MainView(ctk.CTk):
             command=self._update_url_from_selection,
             width=100
         )
-        self.combo_anos.set("2020") # Valor inicial conforme exemplo
+        self.combo_anos.set("2020")
         self.combo_anos.pack(side="left", padx=5)
 
         # Campo de entrada que exibirá a URL montada
         self.url_entry = ctk.CTkEntry(container, placeholder_text="URL gerada aparecerá aqui", width=600)
         self.url_entry.pack(pady=10)
 
-        # Inicializa o campo com a URL padrão do exemplo
-        self._update_url_from_selection()
+        self._update_url_from_selection() # Gera URL inicial baseada nos defaults
 
         self.btn_scrape = ctk.CTkButton(container, text="Iniciar Extração", command=self.on_scrape_click)
         self.btn_scrape.pack(pady=20)
-        
-        self.status_frame = ctk.CTkFrame(container, fg_color="transparent")
-        self.status_frame.pack(pady=10)
-        self.status_label = ctk.CTkLabel(self.status_frame, text="Aguardando...", text_color="gray")
-        self.status_label.pack(side="left")
-        
-        self.btn_logs = ctk.CTkButton(self.status_frame, text="[Ver Logs]", width=60, fg_color="transparent", 
-                                      command=self.open_log_viewer, cursor="hand2")
-        self.btn_logs.pack(side="left", padx=(5, 0))
 
     def _setup_history_tab(self):
         self.history_container = ctk.CTkFrame(self.tab_data)
@@ -218,50 +208,39 @@ class MainView(ctk.CTk):
         self.context_menu.tk_popup(event.x_root, event.y_root)
 
     def show_research_context_menu(self, event):
-        """
-        Menu de contexto aprimorado com extração via buscador e visualização no navegador.
-        """
+        """Menu de contexto com extração de buscador e visualização no navegador."""
         item = self.tree.identify_row(event.y)
         if item:
             self.tree.selection_set(item)
             res_id = self._get_id_from_selected()
-            
-            # Estados para habilitar/desabilitar opções baseados no banco
             html_busc = self.vm.fetch_saved_html_buscador(res_id)
             html_repo = self.vm.db.get_html_repositorio(res_id)
             
             self.research_menu.delete(0, "end")
             
-            # --- SEÇÃO BUSCADOR (BDTD) ---
             if html_busc:
                 self.research_menu.add_command(
-                    label="✨ Obter dados do buscador (Sigla/Univ)", 
+                    label="✨ Extrair dados do buscador (Sigla/Univ)", 
                     command=lambda: self.vm.extract_from_search_engine(res_id, self.update_status_ui, self.load_research_data)
                 )
-            
-            self.research_menu.add_command(
-                label="🌐 Abrir HTML Buscador no Navegador", 
-                command=lambda: self.vm.preview_html_content_in_browser(html_busc) if html_busc else None,
-                state="normal" if html_busc else "disabled"
-            )
-            self.research_menu.add_separator()
+                self.research_menu.add_command(
+                    label="🌐 Abrir HTML Buscador no Navegador", 
+                    command=lambda: self.vm.open_in_browser(res_id) # Reuso do método da VM
+                )
+                self.research_menu.add_separator()
 
-            # --- SEÇÃO REPOSITÓRIO ---
             self.research_menu.add_command(label=self.LABEL_EXTRACT, command=self.trigger_extract_univ)
             
-            self.research_menu.add_command(
-                label="🌐 Abrir HTML Repositório no Navegador", 
-                command=lambda: self.vm.preview_html_content_in_browser(html_repo) if html_repo else None,
-                state="normal" if html_repo else "disabled"
-            )
-            self.research_menu.add_separator()
-
-            # --- LINKS E INTERNO ---
-            self.research_menu.add_command(label="📄 Ver HTML Buscador (Aba)", command=self.view_saved_buscador_html)
-            self.research_menu.add_command(label="📄 Ver HTML Repositório (Aba)", command=self.view_saved_repositorio_html)
-            self.research_menu.add_separator()
-            self.research_menu.add_command(label=self.LABEL_PDF, command=self.open_pdf_link)
+            if html_repo:
+                self.research_menu.add_command(
+                    label="🌐 Abrir HTML Repositório no Navegador", 
+                    command=lambda: self.vm.preview_html_content_in_browser(html_repo)
+                )
             
+            self.research_menu.add_separator()
+            self.research_menu.add_command(label="📄 Ver HTML Buscador (Guia 4)", command=self.view_saved_buscador_html)
+            self.research_menu.add_command(label="📄 Ver HTML Repositório (Guia 5)", command=self.view_saved_repositorio_html)
+            self.research_menu.add_command(label=self.LABEL_PDF, command=self.open_pdf_link)
             self.research_menu.tk_popup(event.x_root, event.y_root)
                         
     def _get_id_from_selected(self):
@@ -378,52 +357,58 @@ class MainView(ctk.CTk):
                 webbrowser.open(pdf_url)
 
     def _setup_url_roots_tab(self):
-        """Configura a guia com botão superior e grupo de caixas de seleção."""
-        # Frame para o botão solicitado acima do grupo
+        """Configura a guia com botão superior e persistência de domínios."""
         self.frame_url_actions = ctk.CTkFrame(self.tab_urls, fg_color="transparent")
         self.frame_url_actions.pack(fill="x", padx=10, pady=5)
 
+        # Botão solicitado acima do grupo
         self.btn_sync_domains = ctk.CTkButton(
             self.frame_url_actions, 
-            text="🔄 Sincronizar Domínios (Ordem Alfabética)", 
+            text="🔄 Sincronizar e Persistir Domínios (A-Z)", 
             command=self.update_url_roots_list,
             width=300
         )
         self.btn_sync_domains.pack(pady=10)
 
-        # Grupo de caixas de seleção (Scrollable)
         self.scroll_urls = ctk.CTkScrollableFrame(
             self.tab_urls, 
-            label_text="Raízes de URLs Identificadas (Sem Repetição)"
+            label_text="Filtros de Domínio (Persistidos no Banco)"
         )
         self.scroll_urls.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         self.domain_vars = {}
 
     def update_url_roots_list(self):
         """
-        Preenche a guia de URLs extraindo domínios únicos em ordem alfabética.
-        Implementado com segurança para evitar o erro AttributeError: scroll_urls.
+        Preenche a guia de URLs em ordem alfabética e recupera estados do banco.
+        Garante persistência ao marcar/desmarcar.
         """
-        if not hasattr(self, 'scroll_urls'):
-            return
+        if not hasattr(self, 'scroll_urls'): return
 
-        # A ViewModel já retorna a lista ordenada via sorted(list(domains))
+        # Busca domínios únicos via VM e estados salvos via DB
         domains = self.vm.get_unique_domains()
+        saved_states = self.vm.db.get_domain_states()
         
-        for widget in self.scroll_urls.winfo_children():
-            widget.destroy()
+        for widget in self.scroll_urls.winfo_children(): widget.destroy()
             
         self.domain_vars = {}
         
-        if not domains:
-            ctk.CTkLabel(self.scroll_urls, text="Nenhum domínio identificado.").pack(pady=20)
-            return
-
         for dom in domains:
-            var = tk.BooleanVar(value=True)
-            cb = ctk.CTkCheckBox(self.scroll_urls, text=dom, variable=var)
+            # Recupera estado salvo ou define como marcado (True) por padrão
+            state = saved_states.get(dom, True)
+            var = tk.BooleanVar(value=state)
+            
+            cb = ctk.CTkCheckBox(
+                self.scroll_urls, 
+                text=dom, 
+                variable=var,
+                command=lambda d=dom, v=var: self.vm.db.save_domain_state(d, v.get())
+            )
             cb.pack(anchor="w", padx=20, pady=5)
             self.domain_vars[dom] = var
+            
+            # Se é um domínio novo, persiste no banco imediatamente
+            if dom not in saved_states:
+                self.vm.db.save_domain_state(dom, True)
 
     def _update_url_entry(self, _=None):
         """Atualiza a url_entry com base na seleção das Comboboxes."""
@@ -438,31 +423,25 @@ class MainView(ctk.CTk):
         self.url_entry.insert(0, resultado)
 
     def _update_url_from_selection(self, _=None):
-        """
-        Monta a URL da BDTD dinamicamente com base nas seleções de termo e ano.
-        Utiliza o formato solicitado: lookfor0[] para o termo e daterange para o ano.
-        """
+        """Monta a URL da BDTD dinamicamente conforme o exemplo solicitado."""
         import urllib.parse
-        
         termo = self.combo_termos.get()
         ano = self.combo_anos.get()
         
-        # Base da URL e parâmetros fixos/dinâmicos
         base_url = "https://bdtd.ibict.br/vufind/Search/Results"
         params = [
             ('join', 'AND'),
             ('bool0[]', 'AND'),
-            ('lookfor0[]', f'"{termo}"'), # Termo dinâmico entre aspas
+            ('lookfor0[]', f'"{termo}"'), # Termo entre aspas
             ('type0[]', 'AllFields'),
-            ('lookfor0[]', 'direito'),    # Filtro fixo solicitado
+            ('lookfor0[]', 'direito'),    # Filtro fixo de assunto
             ('type0[]', 'Subject'),
             ('illustration', '-1'),
             ('daterange[]', 'publishDate'),
-            ('publishDatefrom', ano),     # Ano dinâmico
-            ('publishDateto', ano)        # Ano dinâmico
+            ('publishDatefrom', ano),
+            ('publishDateto', ano)
         ]
         
-        # Constrói a query string garantindo a codificação correta de caracteres como [] e ""
         query_string = urllib.parse.urlencode(params, safe='[]')
         full_url = f"{base_url}?{query_string}"
         
