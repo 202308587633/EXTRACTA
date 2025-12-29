@@ -68,8 +68,8 @@ class MainView(ctk.CTk):
         self.res_container = ctk.CTkFrame(self.tab_res)
         self.res_container.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # 1. Definição das 7 colunas (incluindo 'programa')
-        cols = ("titulo", "autor", "link_busc", "link_repo", "sigla", "univ", "programa")
+        # 1. Definição das 8 colunas (Adicionado 'pdf')
+        cols = ("titulo", "autor", "link_busc", "link_repo", "sigla", "univ", "programa", "pdf")
         self.tree = ttk.Treeview(self.res_container, columns=cols, show="headings")
         
         headers = {
@@ -79,25 +79,26 @@ class MainView(ctk.CTk):
             "link_repo": "Link Repositório",
             "sigla": "Sigla", 
             "univ": "Universidade",
-            "programa": "Programa"
+            "programa": "Programa",
+            "pdf": "Link PDF" # Nova coluna final
         }
         
         # Configuração de cabeçalhos com comando de ordenação por clique
         for col, text in headers.items():
             self.tree.heading(col, text=text, command=lambda c=col: self.sort_treeview(c, False))
-            self.tree.column(col, width=120)
+            self.tree.column(col, width=110)
             
         scrollbar = ttk.Scrollbar(self.res_container, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # 2. Menu de Contexto com a nova opção de Extração por Parser
+        # 2. Menu de Contexto atualizado
         self.research_menu = tk.Menu(self, tearoff=0)
         self.research_menu.add_command(label="📥 Scrap Link Buscador", command=self.trigger_buscador_scrap)
         self.research_menu.add_command(label="🚀 Scrap Link Repositório", command=self.trigger_repositorio_scrap)
         self.research_menu.add_separator()
-        self.research_menu.add_command(label="🎓 Extrair Dados Univ/Programa (Parsers)", command=self.trigger_extract_univ)
+        self.research_menu.add_command(label="🎓 Extrair Sigla/Univ/Programa/PDF", command=self.trigger_extract_univ)
         self.research_menu.add_separator()
         self.research_menu.add_command(label="📄 Ver HTML Buscador (Guia 4)", command=self.view_saved_buscador_html)
         self.research_menu.add_command(label="📄 Ver HTML Repositório (Guia 5)", command=self.view_saved_repositorio_html)
@@ -154,14 +155,14 @@ class MainView(ctk.CTk):
             btn.bind("<Button-3>", lambda e, rid=row[0], rt=row[1], rp=row[4]: self.show_context_menu(e, rid, rt, rp))
 
     def load_research_data(self):
-        """Carrega os resultados garantindo que as 7 colunas sejam exibidas corretamente."""
+        """Carrega os resultados garantindo a exibição das 8 colunas."""
         for item in self.tree.get_children(): 
             self.tree.delete(item)
         
-        # Obtém os dados (deve retornar 7 campos: titulo, autor, link_b, link_r, sigla, univ, programa)
+        # Obtém os dados (deve retornar 8 campos do banco)
         data = self.vm.get_research_results() 
         for row in data:
-            # Garante que campos vazios ou None apareçam como "-"
+            # Processa a linha para garantir que valores nulos apareçam como "-"
             processed_row = [str(val) if val and str(val).strip() != "" else "-" for val in row]
             self.tree.insert("", "end", values=processed_row)
 
@@ -181,14 +182,17 @@ class MainView(ctk.CTk):
             self.tree.selection_set(item)
             res_id = self._get_id_from_selected()
             
-            # O Parser precisa do HTML do repositório (Guia 5)
-            html_repo = self.vm.db.get_html_repositorio(res_id)
-            state_parser = "normal" if html_repo else "disabled"
-            
-            self.research_menu.entryconfig("🎓 Extrair Dados Univ/Programa (Parsers)", state=state_parser)
-            
-            # Controle dos outros menus de visualização
+            # Verifica se o buscador já possui HTML salvo (Guia 4)
             html_busc = self.vm.fetch_saved_html_buscador(res_id)
+            
+            # O Parser refinado prefere o HTML do repositório (Guia 5)
+            html_repo = self.vm.db.get_html_repositorio(res_id)
+            
+            # Habilita extração se houver algum conteúdo para processar
+            state_parser = "normal" if (html_busc or html_repo) else "disabled"
+            self.research_menu.entryconfig("🎓 Extrair Sigla/Univ/Programa/PDF", state=state_parser)
+            
+            # Configuração dos menus de visualização no navegador
             self.research_menu.entryconfig("🌐 Abrir HTML Buscador no Navegador", state="normal" if html_busc else "disabled")
             self.research_menu.entryconfig("🌐 Abrir HTML Repositório no Navegador", state="normal" if html_repo else "disabled")
             
@@ -293,8 +297,8 @@ class MainView(ctk.CTk):
         self.tree.heading(col, command=lambda: self.sort_treeview(col, not reverse))
         
     def trigger_extract_univ(self):
-        """Inicia a extração refinada (Sigla, Univ, Programa) usando a Fábrica de Parsers."""
+        """Inicia a extração refinada (Sigla, Univ, Programa, PDF) usando Parsers."""
         res_id = self._get_id_from_selected()
         if res_id:
-            # Chama a ViewModel para processar o HTML via Parser específico
+            # Chama a ViewModel para processar os dados institucionais e o link do PDF
             self.vm.extract_university_info(res_id, self.update_status_ui, self.load_research_data)

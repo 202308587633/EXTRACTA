@@ -218,6 +218,7 @@ class MainViewModel:
         threading.Thread(target=task, daemon=True).start()
 
     def get_research_results(self):
+        """Retorna os resultados da tabela de pesquisas (agora com 8 colunas)."""
         return self.db.fetch_extracted_data()
 
     def scrape_buscador_link(self, pesquisa_id, url, on_status_change, callback_display):
@@ -314,43 +315,67 @@ class MainViewModel:
             return False, msg_erro
         
     def extract_university_info(self, res_id, on_status_change, callback_refresh):
-        """Extrai Sigla, Univ e Programa usando a estratégia de Fábrica de Parsers."""
+        """
+        Extrai Sigla, Univ, Programa e PDF.
+        Tenta primeiro pelo Repositório (Guia 5 - Completo).
+        Se não houver Guia 5, tenta extrair o que for possível do Buscador (Guia 4).
+        """
         def task():
             try:
-                # 1. Recupera o link e o HTML do repositório (Guia 5)
+                # 1. Busca os dados atuais no banco
                 cursor = self.db.conn.cursor()
-                cursor.execute("SELECT link_repositorio, html_repositorio FROM pesquisas_extraidas WHERE id=?", (res_id,))
+                cursor.execute("""
+                    SELECT link_buscador, html_buscador, link_repositorio, html_repositorio 
+                    FROM pesquisas_extraidas WHERE id=?
+                """, (res_id,))
                 row = cursor.fetchone()
                 
-                if not row or not row[1]:
-                    self._update_step("Erro: HTML do repositório não encontrado (Guia 5).", on_status_change)
+                if not row:
+                    self._update_step("Erro: Registro não encontrado.", on_status_change)
                     return
 
-                link_repo, html_content = row
+                l_busc, h_busc, l_repo, h_repo = row
                 
-                # 2. Obtém o Parser adequado via Factory
-                self._update_step(f"Selecionando parser para: {link_repo[:40]}...", on_status_change)
-                parser = self.factory.get_parser(link_repo)
+                # 2. Prioridade 1: Extração via Parser (Guia 5 - Repositório)
+                if h_repo and l_repo != "-":
+                    self._update_step(f"Usando Parser para Repositório...", on_status_change)
+                    parser = self.factory.get_parser(l_repo)
+                    details = parser.extract_pure_soup(h_repo, l_repo, on_progress=on_status_change)
                 
-                # 3. Executa a extração usando a lógica específica do parser
-                # O método extract_pure_soup é o padrão definido nos parsers específicos
-                details = parser.extract_pure_soup(html_content, link_repo, on_progress=on_status_change)
+                # 3. Prioridade 2: Extração via Buscador (Guia 4 - Dados básicos)
+                elif h_busc:
+                    self._update_step("Guia 5 ausente. Extraindo dados básicos da Guia 4...", on_status_change)
+                    # Usa o parser genérico para tentar pegar Sigla/Univ do HTML do buscador
+                    parser = self.factory.get_parser(l_busc)
+                    details = parser.extract_pure_soup(h_busc, l_busc, on_progress=on_status_change)
+                    # Nota: Programa e PDF raramente estão na Guia 4, então virão como "-"
                 
-                # 4. Salva no Banco de Dados usando o método que suporta a nova coluna 'programa'
+                else:
+                    self._update_step("Erro: Nenhum conteúdo HTML disponível (Guia 4 ou 5).", on_status_change)
+                    return
+
+                # 4. Salva no Banco de Dados (8 colunas via update_parser_data no db_handler)
                 self.db.update_parser_data(res_id, details)
-                self._update_step(f"Sucesso: Dados de {details.get('sigla')} extraídos.", on_status_change)
+                self._update_step(f"Sucesso: {details.get('sigla')} processado.", on_status_change)
                 
                 if callback_refresh:
                     callback_refresh()
 
             except Exception as e:
-                self.db.log_event(f"Erro na extração via Parser: {str(e)}")
+                self.db.log_event(f"Erro na extração: {str(e)}")
                 self._update_step(f"Erro: {str(e)}", on_status_change)
 
         threading.Thread(target=task, daemon=True).start()
-        
-#####################################
-
-        
-        
-    
+       
+    def preview_pdf_in_browser(self, res_id):
+        """Busca o link do PDF no banco e abre no navegador."""
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT link_pdf FROM pesquisas_extraidas WHERE id=?", (res_id,))
+            row = cursor.fetchone()
+            if row and row[0] and row[0] != "-":
+                webbrowser.open(row[0])
+                return True, "Abrindo PDF..."
+            return False, "Link do PDF não disponível. Execute a extração (Parser) primeiro."
+        except Exception as e:
+            return False, str(e)

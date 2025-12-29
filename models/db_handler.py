@@ -53,7 +53,7 @@ class DatabaseHandler:
 
     def create_tables(self):
         """
-        Cria as tabelas necessárias, garantindo a existência da coluna 'programa' 
+        Cria as tabelas necessárias, garantindo a existência da coluna 'link_pdf'
         e das colunas para os conteúdos HTML das Guias 4 e 5.
         """
         cursor = self.conn.cursor()
@@ -72,7 +72,7 @@ class DatabaseHandler:
             )
         """)
         
-        # Tabela consolidada para Pesquisas Extraídas com suporte a Parsers e Programa
+        # Tabela consolidada para Pesquisas Extraídas com suporte a PDF e Programa
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS pesquisas_extraidas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,6 +85,7 @@ class DatabaseHandler:
                 sigla_univ TEXT,       -- Sigla da IES
                 nome_univ TEXT,        -- Nome da Universidade
                 programa TEXT,         -- Nome do Programa de Pós-Graduação
+                link_pdf TEXT,         -- NOVA COLUNA: Link direto para o arquivo PDF
                 parent_rowid INTEGER
             )
         """)
@@ -99,7 +100,7 @@ class DatabaseHandler:
         """)
         
         self.conn.commit()
-
+    
     def update_html_repositorio(self, rowid_pesquisa, html):
         """Salva o HTML capturado do link direto do repositório (Conteúdo da Guia 5)."""
         cursor = self.conn.cursor()
