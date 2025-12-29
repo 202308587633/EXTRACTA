@@ -9,7 +9,6 @@ class DatabaseHandler:
     def create_tables(self):
         cursor = self.conn.cursor()
         
-        # Tabela de Páginas
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS paginas_busca (
                 engine TEXT,
@@ -22,7 +21,6 @@ class DatabaseHandler:
             )
         """)
         
-        # Tabela de Logs
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS system_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,10 +40,16 @@ class DatabaseHandler:
         self.conn.commit()
 
     def delete_scrape(self, rowid):
-        """Remove um registro específico pelo seu rowid."""
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM paginas_busca WHERE rowid = ?", (rowid,))
         self.conn.commit()
+
+    def get_scrape_content_by_id(self, rowid):
+        """Busca apenas o HTML de um registro específico."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT html_source FROM paginas_busca WHERE rowid = ?", (rowid,))
+        result = cursor.fetchone()
+        return result[0] if result else None
 
     def log_event(self, message):
         try:

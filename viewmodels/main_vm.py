@@ -1,4 +1,7 @@
 import threading
+import webbrowser
+import tempfile
+import os
 from urllib.parse import urlparse
 from datetime import datetime
 from html.parser import HTMLParser
@@ -67,7 +70,6 @@ class MainViewModel:
         threading.Thread(target=task, daemon=True).start()
 
     def delete_record(self, rowid, termo, callback_refresh):
-        """Remove o registro e atualiza a UI."""
         try:
             self.db.delete_scrape(rowid)
             self.db.log_event(f"Registro excluído: {termo}")
@@ -75,6 +77,30 @@ class MainViewModel:
                 callback_refresh()
         except Exception as e:
             self.db.log_event(f"Erro ao excluir: {str(e)}")
+
+    def open_in_browser(self, rowid):
+        """
+        Recupera o HTML do banco, cria um arquivo temporário e abre no navegador padrão.
+        """
+        try:
+            html_content = self.db.get_scrape_content_by_id(rowid)
+            if not html_content:
+                return
+
+            # Cria um arquivo temporário com extensão .html
+            # delete=False garante que o navegador consiga ler antes do arquivo sumir
+            fd, path = tempfile.mkstemp(suffix=".html")
+            
+            with os.fdopen(fd, 'w', encoding='utf-8') as tmp:
+                tmp.write(html_content)
+            
+            # Abre o arquivo no navegador padrão do sistema (file://...)
+            webbrowser.open(f'file://{path}')
+            
+            self.db.log_event(f"HTML (ID {rowid}) aberto no navegador.")
+
+        except Exception as e:
+            self.db.log_event(f"Erro ao abrir navegador: {str(e)}")
 
     def get_history(self):
         return self.db.fetch_all()

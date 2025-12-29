@@ -1,4 +1,4 @@
-import tkinter as tk # Import necessário para o Menu nativo
+import tkinter as tk
 import customtkinter as ctk
 from viewmodels.main_vm import MainViewModel
 
@@ -6,7 +6,6 @@ class MainView(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        # Configurações da Janela
         self.title("Modern Scraper & Logger")
         self.geometry("800x600")
         ctk.set_appearance_mode("System")
@@ -78,9 +77,12 @@ class MainView(ctk.CTk):
         
         # --- Configuração do Menu de Contexto ---
         self.context_menu = tk.Menu(self, tearoff=0)
+        # Adiciona opção de Abrir no Navegador
+        self.context_menu.add_command(label="Abrir no Navegador", command=self.open_current_in_browser)
+        self.context_menu.add_separator()
+        # Adiciona opção de Excluir
         self.context_menu.add_command(label="Excluir Registro", command=self.delete_current_selection)
         
-        # Variável para armazenar qual item foi clicado com o botão direito
         self.selected_row_id = None 
         self.selected_row_termo = None
 
@@ -108,8 +110,7 @@ class MainView(ctk.CTk):
         log_window.geometry("500x400")
         log_window.attributes("-topmost", True)
 
-        lbl_title = ctk.CTkLabel(log_window, text="Histórico Completo de Execução", font=("Roboto", 16, "bold"))
-        lbl_title.pack(pady=10)
+        ctk.CTkLabel(log_window, text="Histórico Completo de Execução", font=("Roboto", 16, "bold")).pack(pady=10)
 
         txt_logs = ctk.CTkTextbox(log_window, wrap="word", font=("Consolas", 11))
         txt_logs.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -149,12 +150,11 @@ class MainView(ctk.CTk):
             )
             btn.pack(fill="x", pady=2)
             
-            # --- Bind do Clique Direito ---
-            # row[0] é o ID, row[1] é o termo/url
+            # Bind do Clique Direito
             btn.bind("<Button-3>", lambda event, rid=row[0], rtermo=row[1]: self.show_context_menu(event, rid, rtermo))
 
     def show_context_menu(self, event, row_id, termo):
-        """Exibe o menu no local do mouse e guarda qual item foi clicado."""
+        """Exibe o menu no local do mouse."""
         self.selected_row_id = row_id
         self.selected_row_termo = termo
         try:
@@ -162,13 +162,16 @@ class MainView(ctk.CTk):
         finally:
             self.context_menu.grab_release()
 
-    def delete_current_selection(self):
-        """Chamado quando o usuário clica em 'Excluir' no menu."""
+    def open_current_in_browser(self):
+        """Ação do menu: Abrir no Navegador."""
         if self.selected_row_id is not None:
-            # Chama a VM para deletar e passa load_history_list como callback para atualizar a tela
+            self.vm.open_in_browser(self.selected_row_id)
+
+    def delete_current_selection(self):
+        """Ação do menu: Excluir."""
+        if self.selected_row_id is not None:
             self.vm.delete_record(self.selected_row_id, self.selected_row_termo, self.load_history_list)
             
-            # Limpa a tela de visualização se o item deletado for o que estava aberto
             self.txt_content.configure(state="normal")
             self.txt_content.delete("0.0", "end")
             self.txt_content.configure(state="disabled")
