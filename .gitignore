@@ -1,0 +1,19 @@
+# Ignorar ambiente virtual (a pasta oculta que criamos)
+.venv/
+venv/
+ENV/
+
+# Ignorar arquivos compilados do Python
+__pycache__/
+*.pyc
+
+# Ignorar Banco de Dados (Exemplo SQLite)
+*.sqlite3
+*.db
+db.sqlite3
+
+# Ignorar variáveis de ambiente (Senhas)
+.env
+
+# Ignorar configurações do VS Code
+.vscode/
