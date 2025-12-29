@@ -77,6 +77,7 @@ class DatabaseHandler:
                 autor TEXT,
                 link_buscador TEXT,
                 link_repositorio TEXT,
+                html_buscador TEXT, -- ESTA COLUMNA DEBE EXISTIR
                 parent_rowid INTEGER
             )
         """)
@@ -90,8 +91,20 @@ class DatabaseHandler:
             )
         """)
         
+        # Tabela Pesquisas: Adicionado o campo html_buscador
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pesquisas_extraidas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                titulo TEXT,
+                autor TEXT,
+                link_buscador TEXT,
+                link_repositorio TEXT,
+                html_buscador TEXT, -- NOVO CAMPO
+                parent_rowid INTEGER
+            )
+        """)
         self.conn.commit()
-
+        
     def insert_extracted_data(self, data_list):
         """Insere os dados refinados extraídos do HTML."""
         cursor = self.conn.cursor()
@@ -130,4 +143,17 @@ class DatabaseHandler:
             WHERE rowid = ?
         """, (rowid,))
         return cursor.fetchone()
+
+    def update_html_buscador(self, rowid_pesquisa, html):
+        """Atualiza o registro da pesquisa com o HTML capturado do link do buscador."""
+        cursor = self.conn.cursor()
+        cursor.execute("UPDATE pesquisas_extraidas SET html_buscador = ? WHERE id = ?", (html, rowid_pesquisa))
+        self.conn.commit()
+
+    def get_html_buscador(self, rowid_pesquisa):
+        """Recupera o HTML do buscador armazenado no banco."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT html_buscador FROM pesquisas_extraidas WHERE id = ?", (rowid_pesquisa,))
+        res = cursor.fetchone()
+        return res[0] if res and res[0] else None
     

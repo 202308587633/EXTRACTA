@@ -216,4 +216,47 @@ class MainViewModel:
 
     def get_research_results(self):
         return self.db.fetch_extracted_data()
-    
+
+    def scrape_buscador_link(self, pesquisa_id, url, on_status_change, callback_display):
+        """Realiza o scrap do link interno do buscador e salva no BD."""
+        def task():
+            try:
+                self._update_step(f"Acessando link do buscador: {url[:50]}...", on_status_change)
+                
+                # Usa o WebScraper já implementado para baixar o HTML
+                html = WebScraper.fetch_html(url)
+                
+                # Salva no banco de dados
+                self.db.update_html_buscador(pesquisa_id, html)
+                
+                self._update_step("HTML do buscador salvo com sucesso!", on_status_change)
+                
+                if callback_display:
+                    callback_display(html)
+            except Exception as e:
+                self.db.log_event(f"Erro no scrap do buscador: {str(e)}")
+                self._update_step(f"Erro: {str(e)}", on_status_change)
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def fetch_saved_html_buscador(self, pesquisa_id):
+        return self.db.get_html_buscador(pesquisa_id)
+
+    def preview_html_in_browser(self, pesquisa_id):
+        """Busca o HTML no banco e abre no navegador via arquivo temporário."""
+        html_content = self.db.get_html_buscador(pesquisa_id)
+        
+        if not html_content:
+            return False, "Nenhum HTML encontrado para esta pesquisa. Faça o Scrap primeiro."
+
+        try:
+            # Cria um arquivo temporário que não é deletado imediatamente
+            with tempfile.NamedTemporaryFile('w', delete=False, suffix='.html', encoding='utf-8') as f:
+                f.write(html_content)
+                temp_path = f.name
+            
+            # Abre o arquivo no navegador padrão
+            webbrowser.open(f"file://{os.path.realpath(temp_path)}")
+            return True, "Abrindo no navegador..."
+        except Exception as e:
+            return False, f"Erro ao abrir navegador: {str(e)}"

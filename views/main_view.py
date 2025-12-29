@@ -204,17 +204,6 @@ class MainView(ctk.CTk):
         finally:
             self.context_menu.grab_release()
     
-    def setup_ui(self):
-        self.tabview = ctk.CTkTabview(self)
-        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
-        self.tab_home = self.tabview.add("Scraper")
-        self.tab_data = self.tabview.add("Histórico")
-        self.tab_res = self.tabview.add("Pesquisas")
-
-        self._setup_history_tab()
-        self._setup_research_tab()
-        self._setup_home_tab()
-
     def _setup_research_tab(self):
         self.res_container = ctk.CTkFrame(self.tab_res)
         self.res_container.pack(fill="both", expand=True, padx=10, pady=10)
@@ -232,6 +221,24 @@ class MainView(ctk.CTk):
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         self.load_research_data()
+        
+        
+        # Menu de contexto específico para a Treeview de pesquisas
+        self.research_menu = tk.Menu(self, tearoff=0)
+        self.research_menu.add_command(label="📥 Fazer Scrap do Link Buscador", command=self.trigger_buscador_scrap)
+        self.research_menu.add_command(label="📄 Ver HTML Salvo", command=self.view_saved_buscador_html)
+        
+        # Bind do clique direito na Treeview
+        self.tree.bind("<Button-3>", self.show_research_context_menu)
+        
+        self.research_menu = tk.Menu(self, tearoff=0)
+        self.research_menu.add_command(label="📥 Fazer Scrap do Link Buscador", command=self.trigger_buscador_scrap)
+        self.research_menu.add_command(label="📄 Ver Código HTML (Guia 4)", command=self.view_saved_buscador_html)
+        self.research_menu.add_separator()
+        self.research_menu.add_command(label="🌐 Abrir HTML no Navegador", command=self.open_html_preview)
+        
+        self.tree.bind("<Button-3>", self.show_research_context_menu)
+
 
     def load_research_data(self):
         for item in self.tree.get_children(): self.tree.delete(item)
@@ -242,4 +249,82 @@ class MainView(ctk.CTk):
     def trigger_extraction(self):
         if self.selected_row_id:
             self.vm.extract_research_data(self.selected_row_id, self.update_status_ui, self.on_error, self.load_research_data)
+
+    def setup_ui(self):
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.tab_home = self.tabview.add("Scraper")
+        self.tab_data = self.tabview.add("Histórico")
+        self.tab_res = self.tabview.add("Pesquisas")
+        self.tab_html_busc = self.tabview.add("Conteúdo Buscador") # QUARTA GUIA
+
+        self._setup_history_tab()
+        self._setup_research_tab()
+        self._setup_html_buscador_tab() # Novo setup
+        self._setup_home_tab()
+
+    def _setup_html_buscador_tab(self):
+        """Configura a aba que exibe o HTML do buscador."""
+        self.txt_html_busc = ctk.CTkTextbox(self.tab_html_busc, wrap="none", font=("Consolas", 12))
+        self.txt_html_busc.pack(fill="both", expand=True, padx=10, pady=10)
+
+    def show_research_context_menu(self, event):
+        """Exibe o menu ao clicar com o botão direito em uma linha da tabela."""
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.tree.selection_set(item)
+            self.research_menu.tk_popup(event.x_root, event.y_root)
+
+    def trigger_buscador_scrap(self):
+        """Inicia o scrap do link da linha selecionada."""
+        selected = self.tree.selection()
+        if selected:
+            values = self.tree.item(selected[0])['values']
+            # O link do buscador é a terceira coluna (índice 2)
+            url = values[2]
+            
+            # Precisamos do ID real do banco. Uma forma simples é recarregar os dados 
+            # ou armazenar o ID em uma coluna oculta. Assumindo lógica de busca por título:
+            data = self.vm.db.fetch_extracted_data() 
+            # (Lógica simplificada: busca o ID correspondente ao título no BD)
+            res_id = next((r[0] for r in self.vm.db.conn.execute("SELECT id FROM pesquisas_extraidas WHERE titulo=?", (values[0],))), None)
+
+            if res_id:
+                self.vm.scrape_buscador_link(res_id, url, self.update_status_ui, self.display_buscador_html)
+
+    def display_buscador_html(self, html):
+        """Exibe o HTML na quarta guia e foca nela."""
+        self.txt_html_busc.configure(state="normal")
+        self.txt_html_busc.delete("0.0", "end")
+        self.txt_html_busc.insert("0.0", html)
+        self.tabview.set("Conteúdo Buscador")
+
+    def view_saved_buscador_html(self):
+        """Apenas visualiza o que já foi salvo anteriormente."""
+        selected = self.tree.selection()
+        if selected:
+            values = self.tree.item(selected[0])['values']
+            res_id = next((r[0] for r in self.vm.db.conn.execute("SELECT id FROM pesquisas_extraidas WHERE titulo=?", (values[0],))), None)
+            if res_id:
+                html = self.vm.fetch_saved_html_buscador(res_id)
+                self.display_buscador_html(html if html else "Nenhum conteúdo salvo para este link.")
+                
+    def open_html_preview(self):
+        """Ação do menu para abrir o preview no navegador."""
+        selected = self.tree.selection()
+        if not selected:
+            return
+
+        values = self.tree.item(selected[0])['values']
+        # Busca o ID no banco baseado no título (ou use uma coluna oculta se preferir)
+        res_id = next((r[0] for r in self.vm.db.conn.execute(
+            "SELECT id FROM pesquisas_extraidas WHERE titulo=?", (values[0],))), None)
+
+        if res_id:
+            success, message = self.vm.preview_html_in_browser(res_id)
+            if not success:
+                self.on_error(message)
+            else:
+                self.update_status_ui(message)
 
