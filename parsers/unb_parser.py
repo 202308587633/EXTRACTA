@@ -1,42 +1,30 @@
 import re
+from bs4 import BeautifulSoup
 from parsers.dspace_jspui import DSpaceJSPUIParser
 
 class UnbParser(DSpaceJSPUIParser):
     def __init__(self):
-        super().__init__(sigla="UNB", universidade="Universidade de Brasília")
+        super().__init__(sigla="UnB", universidade="Universidade de Brasília")
 
     def _find_program(self, soup):
         """
-        Estratégia específica para UNB.
-        Prioriza Meta Tags (DC.publisher) e Links explícitos na interface.
+        Busca específica para a estrutura customizada da UnB.
         """
-        # 1. Estratégia de Meta Tags (Forte na UnB)
-        # O repositório da UnB costuma preencher 'DC.publisher' com o nome do programa
-        metas = soup.find_all('meta', attrs={'name': ['DC.publisher', 'citation_publisher']})
-        for meta in metas:
+        # Estratégia 1: Busca pela classe CSS específica da UnB na tabela
+        target = soup.find('td', class_='dc_description_ppg')
+        if target:
+            # Pega a célula seguinte (o valor)
+            value_td = target.find_next_sibling('td')
+            if value_td:
+                return value_td.get_text(strip=True)
+
+        # Estratégia 2: Busca refinada nas meta tags DC.description
+        # Na UnB existem várias, buscamos a que contém o texto do curso
+        meta_descriptions = soup.find_all('meta', attrs={'name': 'DC.description'})
+        for meta in meta_descriptions:
             content = meta.get('content', '')
-            # Filtra para não pegar apenas "Universidade de Brasília"
-            if "Programa" in content or "Pós-Graduação" in content:
-                # Evita falsos positivos muito curtos
-                if len(content) > 10: 
-                    return content
+            if "Programa de Pós-Graduação" in content:
+                return content
 
-        # 2. Estratégia de Link explícito
-        # Procura links que contenham "Programa de Pós-Graduação" no texto
-        prog_link = soup.find('a', string=re.compile(r'Programa de Pós-[Gg]raduação', re.I))
-        if prog_link:
-            return prog_link.get_text(strip=True)
-
-        # 3. Fallback: Estratégias padrão da classe pai (Tabela de metadados, Breadcrumbs)
+        # Estratégia 3: Fallback para a lógica padrão do DSpace
         return super()._find_program(soup)
-
-    def _clean_program_name(self, raw):
-        """
-        Limpeza específica para UnB antes da limpeza padrão.
-        """
-        # Remove prefixos institucionais se aparecerem junto com o programa
-        # Ex: "Universidade de Brasília, Programa de Pós-Graduação em História"
-        clean = re.sub(r'^Universidade de Brasília[.,-]?\s*', '', raw, flags=re.IGNORECASE)
-        
-        # Chama a limpeza padrão (que remove "Programa de Pós-Graduação em", etc.)
-        return super()._clean_program_name(clean)

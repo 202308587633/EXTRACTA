@@ -365,3 +365,62 @@ class MainViewModel:
                 self._update_step(f"Erro: {str(e)}", on_status_change)
 
         threading.Thread(target=task, daemon=True).start()
+
+    def extract_from_search_engine(self, res_id, on_status_change, callback_refresh):
+        """
+        Extrai Sigla, Universidade, Programa e Link do Repositório 
+        diretamente do HTML da BDTD (Guia 4).
+        """
+        def task():
+            try:
+                # 1. Recupera o HTML do buscador salvo no banco de dados
+                html = self.db.get_html_buscador(res_id)
+                url = self.db.get_link_by_id(res_id) 
+
+                if not html:
+                    self._update_step("Erro: HTML do buscador não encontrado no banco.", on_status_change)
+                    return
+
+                self._update_step("Analisando metadados da BDTD...", on_status_change)
+                
+                # 2. Obtém o BDTDParser através da detecção de conteúdo na Factory
+                parser = self.factory.get_parser(url, html)
+                
+                # 3. Extrai os dados institucionais e o link original
+                data = parser.extract_pure_soup(html, url)
+                
+                # 4. Grava os novos dados (Sigla, Univ, Programa e Link PDF/Repo) no banco
+                self.db.update_parser_data(res_id, data)
+                
+                # 5. Notifica sucesso com a sigla encontrada (ex: UDF)
+                self._update_step(f"Sucesso: Dados de {data.get('sigla')} extraídos do buscador.", on_status_change)
+                if callback_refresh: 
+                    callback_refresh()
+
+            except Exception as e:
+                self.db.log_event(f"Erro no menu de contexto (Buscador): {str(e)}")
+                self._update_step(f"Falha na extração: {str(e)}", on_status_change)
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def open_html_buscador_in_browser(self, res_id):
+        """Recupera o HTML da Guia 4 do banco e abre no navegador padrão."""
+        html = self.db.get_html_buscador(res_id)
+        if html:
+            self._open_temp_html(html, f"buscador_{res_id}")
+
+    def open_html_repositorio_in_browser(self, res_id):
+        """Recupera o HTML da Guia 5 do banco e abre no navegador padrão."""
+        html = self.db.get_html_repositorio(res_id)
+        if html:
+            self._open_temp_html(html, f"repositorio_{res_id}")
+
+    def _open_temp_html(self, content, prefix):
+        """Cria um arquivo temporário e o abre no navegador."""
+        try:
+            with tempfile.NamedTemporaryFile('w', delete=False, suffix='.html', prefix=prefix, encoding='utf-8') as f:
+                f.write(content)
+                temp_path = f.name
+            webbrowser.open(f"file://{os.path.abspath(temp_path)}")
+        except Exception as e:
+            print(f"Erro ao abrir HTML no navegador: {e}")

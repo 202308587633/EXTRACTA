@@ -18,21 +18,31 @@ class WebScraper:
         self.driver_path = os.path.join(os.getcwd(), "msedgedriver.exe")
 
     def download_page(self, url, on_progress=None):
-        """Tenta requests; em caso de erro 403 ou falha, usa Selenium + msedgedriver."""
+        """Tenta requests; se houver bloqueio de bot (Anubis/reCAPTCHA), usa Selenium."""
         try:
             if on_progress: on_progress(f"Conectando: {url[:40]}...")
             response = requests.get(url, headers=self.headers, verify=False, timeout=15)
             
-            if response.status_code in [403, 401]:
-                if on_progress: on_progress("Proteção detectada. Iniciando Edge...")
+            html_content = response.text.lower()
+            # Detecta bloqueios que retornam 200 OK mas não mostram conteúdo
+            is_blocked = (
+                response.status_code in [403, 401] or 
+                "recaptcha" in html_content or 
+                "not a bot" in html_content or 
+                "anubis" in html_content or
+                "verificando sua sessão" in html_content
+            )
+
+            if is_blocked:
+                if on_progress: on_progress("Desafio de bot/bloqueio detectado. Iniciando navegador...")
                 return self._download_with_selenium(url, on_progress)
             
             response.raise_for_status()
             return response.text
-        except Exception as e:
+        except Exception:
             if on_progress: on_progress("Falha no acesso direto. Tentando via navegador...")
             return self._download_with_selenium(url, on_progress)
-        
+                
     def _download_with_selenium(self, url, on_progress=None):
         """Abre o navegador Edge para contornar proteções antirrobô."""
         if not os.path.exists(self.driver_path):
@@ -51,7 +61,7 @@ class WebScraper:
             driver.get(url)
             
             # Aguarda o carregamento do conteúdo dinâmico (DSpace 7/9)
-            time.sleep(4) 
+            time.sleep(6) 
             
             html = driver.page_source
             if on_progress: on_progress("Conteúdo capturado com sucesso via Selenium.")
@@ -62,4 +72,4 @@ class WebScraper:
         finally:
             if driver:
                 driver.quit()
-                
+    

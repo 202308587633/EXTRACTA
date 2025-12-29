@@ -61,21 +61,40 @@ from parsers.ufpel_parser import UfpelParser
 from parsers.uninter_parser import UninterParser
 from parsers.ufrn_parser import UfrnParser
 from parsers.ufes_parser import UfesParser
-# Nova importação ENAP
 from parsers.enap_parser import ENAPParser
+from parsers.pucrio_parser import PUCRioParser
+from parsers.uem_parser import UEMParser
+from parsers.ufmt_parser import UfmtParser
+
 
 class ParserFactory:
     def __init__(self):
         self._default = GenericParser()
-        # Mapeamento URL -> Classe
+        # Mapeamento URL/Handle -> Classe
         self._map = {
-            'repositorio.enap.gov.br': ENAPParser, # Adicionado ENAP
+            # --- Novos Mapeamentos Específicos (Incluindo Handles) ---
+            'ri.ufmt.br': UfmtParser,
+            'repositorio.unb.br': UnbParser,
+            'hdl.handle.net/10482': UnbParser,    # Handle UnB
+            'repositorio.ufmg.br': UfmgParser,
+            'hdl.handle.net/1843': UfmgParser,     # Handle UFMG
+            'repositorio.enap.gov.br': ENAPParser,
+            'maxwell.vrac.puc-rio.br': PUCRioParser,
+            'puc-rio.br': PUCRioParser,
+            'uem.br': UEMParser,
+            
+            # --- Mapeamento para Sistema Sophia (Multi-instituição) ---
+            'biblioteca.sophia.com.br/terminalri/9575': UniforParser, # UNIFOR
+            'unifor.br': UniforParser,
+            '.unicamp.br': UnicampParser,
+            'hdl.handle.net/20.500.12733': UnicampParser, # Prefixo Handle da UNICAMP
+
+            # --- Mapeamentos Existentes (Mantidos conforme seu código original) ---
             '.animaeducacao.com.br': UNIFGParser,
             '.ufes.br': UfesParser,
             '.ufrn.br': UfrnParser,
             '.uninter.com': UninterParser,
             '.ufpel.edu.br': UfpelParser,
-            '.unifor.br': UniforParser,
             '.pucrs.br': PucrsParser,
             '.uepb.edu.br': UepbParser,
             '.ufsm.br': UfsmParser,
@@ -87,7 +106,6 @@ class ParserFactory:
             '.ufc.br': UfcParser,
             '.uenp.edu.br': UenpParser,
             '.metodista.br': UMESPParser,
-            '.unicamp.br': UnicampParser,
             '.mackenzie.br': MackenzieParser,
             '.ufmg.br': UfmgParser,
             '.pucsp.br': PucspParser,
@@ -98,7 +116,6 @@ class ParserFactory:
             '.ufu.br': UfuParser,
             '.upf.br': UpfParser,
             '.ucb.br': UcbParser,
-            '.unb.br': UnbParser,
             '.ufrgs.br': UfrgsParser,
             '.ufjf.br': UfjfParser,
             '.ufpb.br': UfpbParser,
@@ -142,31 +159,35 @@ class ParserFactory:
 
     def get_parser(self, url, html_content=None):
         """
-        Seleciona o parser adequado com base na URL ou no conteúdo HTML.
+        Seleciona o parser adequado. Prioriza o BDTDParser se o HTML for do buscador VuFind.
         """
         if not url: 
             return self._default
         
         url_lower = url.lower()
+        html_lower = html_content.lower() if html_content else ""
 
-        # 1. Lógica para Repositórios Compartilhados (Cruzeiro do Sul)
+        # PRIORIDADE: Detecção de Buscador (VuFind/BDTD)
+        # Verifica se o HTML possui a marca do sistema VuFind ou se a URL é do IBICT
+        if "vufind" in html_lower or "bdtd.ibict.br" in url_lower:
+            from parsers.bdtd_parser import BDTDParser
+            return BDTDParser()
+
+        # Lógica para Repositórios Compartilhados (Cruzeiro do Sul / UDF / UNIPÊ)
         if "repositorio.cruzeirodosul.edu.br" in url_lower:
             if html_content:
                 html_upper = html_content.upper()
-                # Diferenciação por termos contidos no HTML das universidades do grupo
                 if "UNIPÊ" in html_upper or "JOÃO PESSOA" in html_upper:
                     from parsers.unipe_parser import UNIPEParser
                     return UNIPEParser()
                 if "UDF" in html_upper or "DISTRITO FEDERAL" in html_upper:
                     from parsers.udf_parser import UDFParser
                     return UDFParser()
-            
-            # Se não identificar sub-instituição, retorna o genérico
             return self._default
 
-        # 2. Lógica Padrão por Domínio (Mapeamento do __init__)
+        # Lógica Padrão por Domínio/Handle
         for domain, parser_cls in self._map.items():
             if domain in url_lower:
                 return parser_cls()
         
-        return self._default
+        return self._default    

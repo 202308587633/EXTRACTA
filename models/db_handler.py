@@ -180,14 +180,23 @@ class DatabaseHandler:
         self.conn.commit()
 
     def update_parser_data(self, res_id, data):
-        """Salva o dicionário do Parser (agora incluindo link_pdf)."""
+        """Salva o dicionário do Parser garantindo a gravação da sigla."""
         cursor = self.conn.cursor()
         cursor.execute("""
             UPDATE pesquisas_extraidas 
-            SET sigla_univ = ?, nome_univ = ?, programa = ?, link_pdf = ? 
+            SET sigla_univ = ?, nome_univ = ?, programa = ?, link_pdf = ?
             WHERE id = ?
         """, (
-            data.get('sigla', '-'), data.get('universidade', '-'), 
-            data.get('programa', '-'), data.get('link_pdf', '-'), res_id
+            data.get('sigla', '-'), 
+            data.get('universidade', '-'), 
+            data.get('programa', '-'), 
+            data.get('link_pdf', '-'), 
+            res_id
         ))
         self.conn.commit()
+
+    def get_link_by_id(self, res_id):
+        """Retorna o link_buscador associado ao ID da pesquisa."""
+        cursor = self.conn.execute("SELECT link_buscador FROM pesquisas_extraidas WHERE id=?", (res_id,))
+        row = cursor.fetchone()
+        return row[0] if row else None

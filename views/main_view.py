@@ -172,36 +172,80 @@ class MainView(ctk.CTk):
         self.context_menu.tk_popup(event.x_root, event.y_root)
 
     def show_research_context_menu(self, event):
-        """Exibe o menu de contexto validando os estados das opções."""
+        """
+        Exibe o menu de contexto validando os estados das opções e 
+        incluindo a extração direta a partir do buscador.
+        """
         item = self.tree.identify_row(event.y)
         if item:
             self.tree.selection_set(item)
             res_id = self._get_id_from_selected()
             
-            # 1. Verifica conteúdos salvos
+            # 1. Recupera estados dos conteúdos para habilitar/desabilitar opções
             html_busc = self.vm.fetch_saved_html_buscador(res_id)
             html_repo = self.vm.db.get_html_repositorio(res_id)
             
-            # Habilita extração se houver qualquer HTML disponível
-            state_parser = "normal" if (html_busc or html_repo) else "disabled"
-            
-            # 2. Verifica se há link de PDF na 8ª coluna (índice 7)
+            # 2. Obtém o link do PDF/Repositório da 8ª coluna (índice 7)
             values = self.tree.item(item, "values")
             pdf_link = values[7] if len(values) > 7 else "-"
-            state_pdf = "normal" if (pdf_link and pdf_link != "-") else "disabled"
-
-            # 3. Atualiza o menu usando as variáveis de label para garantir o 'index'
-            try:
-                self.research_menu.entryconfig(self.LABEL_EXTRACT, state=state_parser)
-                self.research_menu.entryconfig(self.LABEL_PDF, state=state_pdf)
-            except tk.TclError:
-                # Fallback caso o label mude por algum motivo: tenta por índice numérico
-                # 0:ScrapB, 1:ScrapR, 2:sep, 3:Extrair, 4:sep, 5:HTMLB, 6:HTMLR, 7:sep, 8:PDF
-                self.research_menu.entryconfig(3, state=state_parser)
-                self.research_menu.entryconfig(8, state=state_pdf)
             
-            self.research_menu.tk_popup(event.x_root, event.y_root)
+            # 3. Limpa e reconstrói o menu para garantir que a opção do buscador seja contextual
+            self.research_menu.delete(0, "end")
+            
+            # Opções de Scraping
+            self.research_menu.add_command(label="📥 Scrap Link Buscador", 
+                                          command=self.trigger_buscador_scrap)
+            self.research_menu.add_command(label="🚀 Scrap Link Repositório", 
+                                          command=self.trigger_repositorio_scrap)
+            self.research_menu.add_separator()
 
+            # NOVIDADE: Opção de extração direta do Buscador (BDTD)
+            # Só aparece se o HTML do buscador já tiver sido capturado (Guia 4)
+            if html_busc:
+                self.research_menu.add_command(
+                    label="✨ Obter a partir dos dados do buscador", 
+                    command=lambda: self.vm.extract_from_search_engine(res_id, self.update_status_ui, self.load_research_data)
+                )
+                self.research_menu.add_separator()
+
+            # Opção de Extração Completa (via Parsers)
+            state_parser = "normal" if (html_busc or html_repo) else "disabled"
+            self.research_menu.add_command(label=self.LABEL_EXTRACT, 
+                                          command=self.trigger_extract_univ, 
+                                          state=state_parser)
+            self.research_menu.add_separator()
+
+            # Opções de Visualização de HTML
+            self.research_menu.add_command(label="📄 Ver HTML Buscador (Guia 4)", 
+                                          command=self.view_saved_buscador_html,
+                                          state="normal" if html_busc else "disabled")
+            self.research_menu.add_command(label="📄 Ver HTML Repositório (Guia 5)", 
+                                          command=self.view_saved_repositorio_html,
+                                          state="normal" if html_repo else "disabled")
+            self.research_menu.add_separator()
+
+            # --- SEÇÃO DE VISUALIZAÇÃO NO NAVEGADOR (SOLICITADO) ---
+            self.research_menu.add_command(
+                label="🌐 Abrir HTML do Buscador no Navegador", 
+                command=lambda: self.vm.open_html_buscador_in_browser(res_id),
+                state="normal" if html_busc else "disabled"
+            )
+            self.research_menu.add_command(
+                label="🌐 Abrir HTML do Repositório no Navegador", 
+                command=lambda: self.vm.open_html_repositorio_in_browser(res_id),
+                state="normal" if html_repo else "disabled"
+            )
+            self.research_menu.add_separator()
+
+            # Opção de PDF
+            state_pdf = "normal" if (pdf_link and pdf_link != "-") else "disabled"
+            self.research_menu.add_command(label=self.LABEL_PDF, 
+                                          command=self.open_pdf_link, 
+                                          state=state_pdf)
+            
+            # Exibe o menu na posição do clique
+            self.research_menu.tk_popup(event.x_root, event.y_root)            
+            
     def _get_id_from_selected(self):
         selected = self.tree.selection()
         if not selected: return None
@@ -314,3 +358,4 @@ class MainView(ctk.CTk):
             if pdf_url and pdf_url != "-":
                 import webbrowser
                 webbrowser.open(pdf_url)
+

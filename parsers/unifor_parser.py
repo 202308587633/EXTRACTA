@@ -1,58 +1,77 @@
 import re
+from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-from parsers.dspace_jspui import DSpaceJSPUIParser
+from parsers.base_parser import BaseParser
 
-class UniforParser(DSpaceJSPUIParser):
+class UniforParser(BaseParser):
     def __init__(self):
+        # Sigla e nome institucional conforme identificado nas meta tags do Sophia
         super().__init__(sigla="UNIFOR", universidade="Universidade de Fortaleza")
 
-    def _find_program(self, soup):
+    def extract_pure_soup(self, html_content, url, on_progress=None):
         """
-        Estratégia específica para UNIFOR (Sistema Sophia).
-        O programa é listado como um 'autor' ou 'colaborador' com o nome da instituição.
-        Ex: <a title="Universidade de Fortaleza. Programa de Pós-Graduação em Direito Constitucional">
+        Extrai dados do repositório Sophia da UNIFOR.
         """
-        # Busca por links que contenham "Programa de Pós-Graduação" no texto ou no título
-        # O sistema Sophia coloca isso dentro de divs com class="box-duplo"
+        soup = BeautifulSoup(html_content, 'html.parser')
         
-        # 1. Tenta pelo atributo title (comum no exemplo fornecido)
-        link_title = soup.find('a', title=re.compile(r'Programa de Pós-Graduação', re.IGNORECASE))
-        if link_title:
-            return link_title['title']
+        data = {
+            'sigla': self.sigla,
+            'universidade': self.universidade,
+            'programa': '-',
+            'link_pdf': '-'
+        }
 
-        # 2. Tenta pelo texto do link
-        link_text = soup.find('a', string=re.compile(r'Programa de Pós-Graduação', re.IGNORECASE))
-        if link_text:
-            return link_text.get_text(strip=True)
+        if on_progress: on_progress("UNIFOR: Analisando metadados Sophia...")
 
-        # 3. Fallback para a implementação padrão
-        return super()._find_program(soup)
+        # --- 1. EXTRAÇÃO DO PROGRAMA ---
+        try:
+            # No Sophia, o programa geralmente está listado na seção de 'Autoria' 
+            # com o rótulo 'Dissertação (mestrado)' ou 'Tese (doutorado)'
+            autoria_section = soup.find('label', text=re.compile(r'Autoria', re.I))
+            if autoria_section:
+                # Procura o container pai e busca o texto associado ao nível acadêmico
+                parent_div = autoria_section.find_parent('div', class_='form-group')
+                if parent_div:
+                    # Busca por blocos que contenham o nome da universidade e o programa
+                    program_box = parent_div.find('a', title=re.compile(r'Programa de Pós-Graduação', re.I))
+                    if program_box:
+                        raw_text = program_box.get_text(strip=True)
+                        # Limpa o nome da universidade do texto (ex: "Universidade de Fortaleza. ")
+                        data['programa'] = raw_text.replace("Universidade de Fortaleza.", "").strip()
 
-    def _clean_program_name(self, raw):
-        """
-        Limpeza para UNIFOR.
-        Entrada esperada: "Universidade de Fortaleza. Programa de Pós-Graduação em Direito Constitucional"
-        Saída desejada: "Direito Constitucional"
-        """
-        # Remove o nome da universidade e pontuação
-        clean = re.sub(r'^Universidade de Fortaleza[\.\s-]*', '', raw, flags=re.IGNORECASE)
-        
-        # Remove o prefixo do programa
-        clean = re.sub(r'Programa de Pós-Graduação (?:em|no|na)\s+', '', clean, flags=re.IGNORECASE)
-        
-        return super()._clean_program_name(clean)
+            # Fallback: Meta tag citation_dissertation_institution (menos específico, mas útil)
+            if data['programa'] == '-':
+                meta_inst = soup.find('meta', attrs={'name': 'citation_dissertation_institution'})
+                if meta_inst:
+                    data['programa'] = meta_inst.get('content', '-')
 
-    def _find_pdf(self, soup, base_url):
-        """
-        No sistema Sophia, o link para o recurso muitas vezes não está nas meta tags padrão de PDF,
-        mas sim numa seção de links externos (class='sites').
-        """
-        # Estratégia Sophia: Procurar na div/p com classe 'sites'
-        sites_container = soup.find(class_='sites')
-        if sites_container:
-            link = sites_container.find('a', href=True)
-            if link:
-                return urljoin(base_url, link['href'])
+        except Exception as e:
+            if on_progress: on_progress(f"UNIFOR: Erro no Programa: {str(e)[:20]}")
 
-        # Fallback para meta tags padrão (citation_pdf_url) se existirem
-        return super()._find_pdf(soup, base_url)
+        # --- 2. EXTRAÇÃO DO LINK DO PDF ---
+        try:
+            pdf_url = None
+            
+            # Estratégia A: O Sophia costuma colocar o link real em um parágrafo de classe 'sites'
+            url_p = soup.find('p', class_='sites')
+            if url_p:
+                pdf_link_tag = url_p.find('a', href=re.compile(r'/exibicao/'))
+                if pdf_link_tag:
+                    pdf_url = pdf_link_tag.get('href')
+
+            # Estratégia B: Atributo citation_pdf_url (se disponível)
+            if not pdf_url:
+                pdf_meta = soup.find('meta', attrs={'name': 'citation_pdf_url'})
+                if pdf_meta:
+                    pdf_url = pdf_meta.get('content')
+
+            if pdf_url:
+                data['link_pdf'] = urljoin(url, pdf_url)
+                if on_progress: on_progress("UNIFOR: Link do documento localizado.")
+            else:
+                if on_progress: on_progress("UNIFOR: PDF não encontrado.")
+
+        except Exception as e:
+            if on_progress: on_progress(f"UNIFOR: Erro no PDF: {str(e)[:20]}")
+
+        return data
