@@ -8,7 +8,8 @@ class HistoryTab(ctk.CTkFrame):
         self.update_status_ui = update_status_callback
         self.load_research_data = load_research_callback
         
-        # Atributos para seleção no menu de contexto
+        self.history_buttons = []
+        
         self.selected_row_id = None
         self.selected_row_termo = None
         self.selected_row_page = None
@@ -62,19 +63,19 @@ class HistoryTab(ctk.CTkFrame):
         self.load_history_list()
 
     def load_history_list(self):
-        """Carrega a lista de histórico limpando widgets de forma segura."""
         if not self.list_frame.winfo_exists():
             return
 
-        for widget in self.list_frame.winfo_children():
-            widget.destroy()
+        for btn in self.history_buttons:
+            if btn.winfo_exists():
+                btn.destroy()
+        self.history_buttons.clear()
 
-        data = self.vm.get_history() #
+        data = self.vm.get_history()
         if not data:
             return
 
         for row in data:
-            # row: (rowid, termo, data_coleta, html_source, pagina)
             display_text = f"Pág {row[4]}: {row[1][:20]}..."
             
             btn = ctk.CTkButton(
@@ -86,9 +87,10 @@ class HistoryTab(ctk.CTkFrame):
             )
             btn.pack(fill="x", pady=2)
             
-            # Bind para botão direito
             btn.bind("<Button-3>", lambda e, rid=row[0], rt=row[1], rp=row[4]: 
                      self.show_context_menu(e, rid, rt, rp))
+            
+            self.history_buttons.append(btn)
 
     def display_content(self, row_data):
         """Exibe o HTML convertido em texto na área de visualização."""
@@ -111,7 +113,6 @@ class HistoryTab(ctk.CTkFrame):
         self.context_menu.add_command(label="Excluir", command=self.delete_current_selection)
         self.context_menu.tk_popup(event.x_root, event.y_root)
 
-    # Chamadas de Lógica (Proxies para a ViewModel)
     def open_current_in_browser(self):
         if self.selected_row_id: self.vm.open_in_browser(self.selected_row_id)
 

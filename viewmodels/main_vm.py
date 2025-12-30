@@ -152,7 +152,7 @@ class MainViewModel:
                 extracted_to_db = []
                 for res in results:
                     title_tag = res.select_one('h2 a.title')
-                    titulo = title_tag.get_text(strip=True) if title_tag else "-"
+                    titulo = title_tag.get_text(" ",strip=True) if title_tag else "-"
                     l_busc = title_tag['href'] if title_tag else "-"
                     if l_busc.startswith('/'): 
                         l_busc = "https://bdtd.ibict.br" + l_busc
