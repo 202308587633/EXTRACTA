@@ -182,7 +182,7 @@ class MainViewModel:
                     if l_busc.startswith('/'): 
                         l_busc = "https://bdtd.ibict.br" + l_busc
 
-                    autor = res.select_one('a[href*="/Author/"]').get_text(strip=True) if res.select_one('a[href*="/Author/"]') else "-"
+                    autor = res.select_one('a[href*="/Author/"]').get_text(" ", strip=True) if res.select_one('a[href*="/Author/"]') else "-"
                     repo_tag = res.find('a', string=lambda s: s and "Acessar documento" in s)
                     l_repo = repo_tag['href'] if repo_tag else "-"
 
@@ -451,12 +451,12 @@ class MainViewModel:
         extracted_to_db = []
         for res in results:
             title_tag = res.select_one('h2 a.title')
-            titulo = title_tag.get_text(strip=True) if title_tag else "-"
+            titulo = title_tag.get_text(" ", strip=True) if title_tag else "-"
             l_busc = title_tag['href'] if title_tag else "-"
             if l_busc.startswith('/'): 
                 l_busc = "https://bdtd.ibict.br" + l_busc
 
-            autor = res.select_one('a[href*="/Author/"]').get_text(strip=True) if res.select_one('a[href*="/Author/"]') else "-"
+            autor = res.select_one('a[href*="/Author/"]').get_text(" ", strip=True) if res.select_one('a[href*="/Author/"]') else "-"
             repo_tag = res.find('a', string=lambda s: s and "Acessar documento" in s)
             l_repo = repo_tag['href'] if repo_tag else "-"
 
@@ -696,19 +696,11 @@ class MainViewModel:
                     pass
 
     def batch_download_repository_html(self, on_status_change, callback_refresh):
-        """
-        Crawler de 2ª Etapa:
-        Baixa o HTML final do repositório para todas as pesquisas que ainda não o possuem.
-        """
         def task():
             try:
-                # 1. Busca itens que precisam de download
-                # Critério: Tem link_repositorio mas não tem html_repositorio
-                # Ou: Tem link_buscador mas não tem link_repositorio (caso o link direto seja o do buscador)
                 cursor = self.db.conn.cursor()
                 cursor.execute("""
-                    SELECT id, link_buscador, link_repositorio 
-                    FROM pesquisas_extraidas 
+                    SELECT id FROM pesquisas_extraidas 
                     WHERE (html_repositorio IS NULL OR html_repositorio = '')
                     AND (link_repositorio IS NOT NULL OR link_buscador IS NOT NULL)
                 """)
@@ -716,45 +708,64 @@ class MainViewModel:
                 total = len(rows)
 
                 if total == 0:
-                    self._update_step("Todos os registros já possuem HTML baixado.", on_status_change)
+                    self._update_step("Todos os registros já possuem HTML salvo.", on_status_change)
                     return
 
-                self._update_step(f"Iniciando download de HTML para {total} registros...", on_status_change)
+                self._update_step(f"Iniciando download em lote de {total} itens...", on_status_change)
                 
-                scraper = WebScraper() # Instância local para thread
                 success_count = 0
-
-                for i, (rid, l_busc, l_repo) in enumerate(rows, 1):
-                    # Define qual link usar (Prioridade: Repositório > Buscador)
-                    target_url = l_repo if (l_repo and 'http' in l_repo) else l_busc
+                for i, (rid,) in enumerate(rows, 1):
+                    self._update_step(f"[{i}/{total}] Baixando HTML (ID {rid})...", on_status_change)
                     
-                    if not target_url or 'http' not in target_url:
-                        continue
-
-                    self._update_step(f"[{i}/{total}] Baixando: {target_url[:40]}...", on_status_change)
+                    if self._internal_download_logic(rid):
+                        success_count += 1
                     
-                    try:
-                        # Download real
-                        html = scraper.download_page(target_url)
-                        
-                        if html and len(html) > 100:
-                            # Atualiza no banco
-                            self.db.update_html_content(rid, html, is_repository=True)
-                            success_count += 1
-                        else:
-                            self.db.log_event(f"Falha download ID {rid}: HTML vazio")
-                            
-                    except Exception as e:
-                        self.db.log_event(f"Erro download ID {rid}: {e}")
-                    
-                    # Pausa educada para não bloquear o servidor (opcional)
                     time.sleep(0.5)
 
-                self._update_step(f"Download em lote concluído! {success_count} arquivos salvos.", on_status_change)
+                self._update_step(f"Lote finalizado! {success_count} novos arquivos salvos.", on_status_change)
                 if callback_refresh: callback_refresh()
 
             except Exception as e:
-                self.db.log_event(f"Erro Crítico Download Lote: {e}")
-                self._update_step(f"Erro no Download: {str(e)}", on_status_change)
+                self.db.log_event(f"Erro Crítico Batch Download: {str(e)}")
+                self._update_step(f"Erro no Lote: {str(e)}", on_status_change)
 
         threading.Thread(target=task, daemon=True).start()
+
+    def download_repository_html(self, row_id, on_status_change, callback_refresh):
+        def task():
+            self._update_step(f"Baixando HTML para ID {row_id}...", on_status_change)
+            if self._internal_download_logic(row_id):
+                self._update_step("HTML baixado e salvo com sucesso.", on_status_change)
+                if callback_refresh: callback_refresh()
+            else:
+                self._update_step("Falha ao baixar HTML ou link inválido.", on_status_change)
+        
+        threading.Thread(target=task, daemon=True).start()
+
+    def _internal_download_logic(self, row_id):
+        try:
+            record = self.db.fetch_research_record(row_id)
+            if not record: return False
+
+            l_busc = record[2]
+            l_repo = record[3]
+
+            target_url = l_repo if (l_repo and l_repo.startswith('http')) else l_busc
+            
+            if not target_url or not target_url.startswith('http'):
+                return False
+
+            scraper = WebScraper()
+            html_content = scraper.download_page(target_url)
+            
+            if html_content and len(html_content) > 100:
+                self.db.update_html_repositorio(row_id, html_content)
+                return True
+            else:
+                self.db.log_event(f"HTML vazio ou inválido para ID {row_id}")
+                return False
+
+        except Exception as e:
+            self.db.log_event(f"Erro interno download ID {row_id}: {str(e)}")
+            return False
+    
