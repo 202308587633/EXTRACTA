@@ -70,41 +70,58 @@ class ResearchTab(ctk.CTkFrame):
         self.tree.heading(col, command=lambda: self.sort_treeview(col, not reverse))
 
     def show_research_context_menu(self, event):
-        """Menu de contexto com visualização no navegador e extração refinada."""
+        """Menu de contexto completo com disparadores de scrap e visualização."""
         item = self.tree.identify_row(event.y)
         if item:
             self.tree.selection_set(item)
             res_id = self._get_id_from_selected()
             
-            # Verifica conteúdos guardados para habilitar opções de visualização
+            # Recupera dados para validar quais opções exibir
             html_busc = self.vm.fetch_saved_html_buscador(res_id)
             html_repo = self.vm.db.get_html_repositorio(res_id)
             
             self.research_menu.delete(0, "end")
             
+            # --- 1. Ações de Scrap (Busca de HTML) ---
+            self.research_menu.add_command(
+                label="🔍 Fazer Scrap da Página de Busca (Guia 4)", 
+                command=self.trigger_buscador_scrap
+            )
+            self.research_menu.add_command(
+                label="🌐 Fazer Scrap do Repositório (Guia 5)", 
+                command=self.trigger_repositorio_scrap
+            )
+            self.research_menu.add_separator()
+
+            # --- 2. Ações de Extração Inteligente ---
             if html_busc:
                 self.research_menu.add_command(
                     label="✨ Extrair dados do buscador (Sigla/Univ)", 
                     command=lambda: self.vm.extract_from_search_engine(res_id, self.update_status_ui, self.load_research_data)
                 )
-                self.research_menu.add_command(
-                    label="🌐 Abrir HTML Buscador no Navegador", 
-                    command=lambda: self.vm.open_html_in_browser(res_id, "buscador")
-                )
-                self.research_menu.add_separator()
-
-            self.research_menu.add_command(label=self.LABEL_EXTRACT, command=self.trigger_extract_univ)
             
+            self.research_menu.add_command(
+                label=self.LABEL_EXTRACT, 
+                command=self.trigger_extract_univ
+            )
+            self.research_menu.add_separator()
+
+            # --- 3. Visualização e PDF ---
+            if html_busc:
+                self.research_menu.add_command(
+                    label="📄 Ver HTML Buscador (Interno)", 
+                    command=self.view_saved_buscador_html
+                )
             if html_repo:
                 self.research_menu.add_command(
-                    label="🌐 Abrir HTML Repositório no Navegador", 
-                    command=lambda: self.vm.open_html_in_browser(res_id, "repositorio")
+                    label="📄 Ver HTML Repositório (Interno)", 
+                    command=self.view_saved_repositorio_html
                 )
             
-            self.research_menu.add_separator()
             self.research_menu.add_command(label=self.LABEL_PDF, command=self.open_pdf_link)
+            
             self.research_menu.tk_popup(event.x_root, event.y_root)
-
+            
     def _get_id_from_selected(self):
         """Recupera o ID da base de dados através do título selecionado."""
         selected = self.tree.selection()
@@ -127,3 +144,46 @@ class ResearchTab(ctk.CTkFrame):
             if pdf_url and pdf_url != "-":
                 import webbrowser
                 webbrowser.open(pdf_url)
+
+    def view_saved_buscador_html(self):
+        """Envia o HTML salvo para a aba de visualização no MainView."""
+        res_id = self._get_id_from_selected()
+        if res_id:
+            html = self.vm.fetch_saved_html_buscador(res_id)
+            # Acessa o método de exibição através do master (MainView)
+            self.master.master.master.display_buscador_html(html if html else "Nenhum conteúdo salvo.")
+
+    def view_saved_repositorio_html(self):
+        """Envia o HTML salvo para a aba de visualização no MainView."""
+        res_id = self._get_id_from_selected()
+        if res_id:
+            html = self.vm.db.get_html_repositorio(res_id)
+            # Acessa o método de exibição através do master (MainView)
+            self.master.master.master.display_repositorio_html(html if html else "Nenhum conteúdo salvo.")
+
+    def trigger_buscador_scrap(self):
+        """Dispara a captura do HTML da página de detalhes da BDTD."""
+        selected = self.tree.selection()
+        if selected:
+            # 3ª coluna (índice 2) contém o link do buscador
+            url = self.tree.item(selected[0])['values'][2]
+            res_id = self._get_id_from_selected()
+            # Chama a VM e define o callback para exibir o HTML na aba correta
+            self.vm.scrape_buscador_link(
+                res_id, url, self.update_status_ui, 
+                self.master.master.master.display_buscador_html
+            )
+
+    def trigger_repositorio_scrap(self):
+        """Dispara a captura do HTML diretamente do repositório da universidade."""
+        selected = self.tree.selection()
+        if selected:
+            # 4ª coluna (índice 3) contém o link do repositório
+            url = self.tree.item(selected[0])['values'][3]
+            res_id = self._get_id_from_selected()
+            if url != "-":
+                # Chama a VM e define o callback para exibir o HTML na aba correta
+                self.vm.scrape_repositorio_link(
+                    res_id, url, self.update_status_ui, 
+                    self.master.master.master.display_repositorio_html
+                )
