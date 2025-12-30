@@ -12,21 +12,22 @@ class HomeTab(ctk.CTkFrame):
 
     def setup_ui(self):
         """Configura a aba Scraper com Comboboxes e campo de URL dinâmico."""
+        # Container centralizado verticalmente
         container = ctk.CTkFrame(self, fg_color="transparent")
         container.pack(expand=True)
 
         self.label = ctk.CTkLabel(
             container, 
             text="Parâmetros de Pesquisa BDTD", 
-            font=("Roboto", 18)
+            font=("Roboto", 18, "bold")
         )
-        self.label.pack(pady=(0, 20))
+        self.label.pack(pady=(0, 25))
 
         # Frame para as seleções (Termos e Anos)
         combos_frame = ctk.CTkFrame(container, fg_color="transparent")
         combos_frame.pack(fill="x", pady=10)
 
-        # 1. Combobox para Termos de Pesquisa solicitados
+        # 1. Combobox para Termos de Pesquisa
         self.combo_termos = ctk.CTkComboBox(
             combos_frame, 
             width=220, 
@@ -37,7 +38,7 @@ class HomeTab(ctk.CTkFrame):
             command=self._update_url_from_selection
         )
         self.combo_termos.set("jurimetria")
-        self.combo_termos.pack(side="left", padx=5)
+        self.combo_termos.pack(side="left", padx=(0, 10))
 
         # 2. Combobox para Anos (2020 a 2025)
         self.combo_anos = ctk.CTkComboBox(
@@ -47,11 +48,16 @@ class HomeTab(ctk.CTkFrame):
             command=self._update_url_from_selection
         )
         self.combo_anos.set("2020")
-        self.combo_anos.pack(side="left", padx=5)
+        self.combo_anos.pack(side="left")
 
         # Campo de entrada que exibe a URL final montada
-        self.url_entry = ctk.CTkEntry(container, placeholder_text="URL gerada...", width=600)
-        self.url_entry.pack(pady=10)
+        self.url_entry = ctk.CTkEntry(
+            container, 
+            placeholder_text="URL gerada...", 
+            width=600,
+            font=("Consolas", 11)
+        )
+        self.url_entry.pack(pady=15)
         
         # Inicializa a URL com os valores padrão
         self._update_url_from_selection()
@@ -60,13 +66,14 @@ class HomeTab(ctk.CTkFrame):
         self.btn_scrape = ctk.CTkButton(
             container, 
             text="Iniciar Extração", 
-            command=self.on_scrape_click
+            command=self.on_scrape_click,
+            height=35,
+            font=("Roboto", 13, "bold")
         )
         self.btn_scrape.pack(pady=20)
 
-        # Rótulo de status (atualizado via callback da thread principal)
-        self.status_label = ctk.CTkLabel(container, text="Pronto para iniciar.", text_color="gray")
-        self.status_label.pack(pady=5)
+        # OBS: O status_label foi removido daqui pois agora existe 
+        # uma barra de status global no MainView.
 
     def _update_url_from_selection(self, _=None):
         """Monta a URL da BDTD dinamicamente conforme os parâmetros selecionados."""
@@ -103,8 +110,11 @@ class HomeTab(ctk.CTkFrame):
             self.on_error("A URL não foi gerada corretamente.")
             return
 
+        # Desabilita o botão para evitar cliques múltiplos
         self.btn_scrape.configure(state="disabled")
-        # Dispara a tarefa na ViewModel garantindo a persistência do termo e ano
+        
+        # Dispara a tarefa na ViewModel
+        # O callback update_status_ui agora atualiza o rodapé global do MainView
         self.vm.perform_scrape(
             url, 
             termo_amigavel, 

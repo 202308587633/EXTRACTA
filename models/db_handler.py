@@ -218,3 +218,15 @@ class DatabaseHandler:
         """Recupera os estados salvos para renderizar os checkboxes."""
         cursor = self.conn.execute("SELECT dominio, ativo FROM dominios_filtros")
         return {row[0]: bool(row[1]) for row in cursor.fetchall()}
+
+    def fetch_research_record(self, res_id):
+        """Retorna os dados de uma única pesquisa para atualização pontual na interface."""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT titulo, autor, link_buscador, link_repositorio, 
+                   sigla_univ, nome_univ, programa, link_pdf,
+                   termo_pesquisado, ano_pesquisado 
+            FROM pesquisas_extraidas 
+            WHERE id = ?
+        """, (res_id,))
+        return cursor.fetchone()

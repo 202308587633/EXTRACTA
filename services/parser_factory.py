@@ -65,31 +65,26 @@ from parsers.enap_parser import ENAPParser
 from parsers.pucrio_parser import PUCRioParser
 from parsers.uem_parser import UEMParser
 from parsers.ufmt_parser import UfmtParser
-
+from parsers.uepg_parser import UEPGParser
 
 class ParserFactory:
     def __init__(self):
         self._default = GenericParser()
         # Mapeamento URL/Handle -> Classe
         self._map = {
-            # --- Novos Mapeamentos Específicos (Incluindo Handles) ---
+            # --- Mapeamentos Específicos (Incluindo Handles) ---
+            'uepg.br': UEPGParser,
             'ri.ufmt.br': UfmtParser,
             'repositorio.unb.br': UnbParser,
-            'hdl.handle.net/10482': UnbParser,    # Handle UnB
+            'hdl.handle.net/10482': UnbParser,    
             'repositorio.ufmg.br': UfmgParser,
-            'hdl.handle.net/1843': UfmgParser,     # Handle UFMG
+            'hdl.handle.net/1843': UfmgParser,     
             'repositorio.enap.gov.br': ENAPParser,
             'maxwell.vrac.puc-rio.br': PUCRioParser,
             'puc-rio.br': PUCRioParser,
             'uem.br': UEMParser,
-            
-            # --- Mapeamento para Sistema Sophia (Multi-instituição) ---
-            'biblioteca.sophia.com.br/terminalri/9575': UniforParser, # UNIFOR
-            'unifor.br': UniforParser,
-            '.unicamp.br': UnicampParser,
-            'hdl.handle.net/20.500.12733': UnicampParser, # Prefixo Handle da UNICAMP
-
-            # --- Mapeamentos Existentes (Mantidos conforme seu código original) ---
+            ".unifesp.br": UNIFESPParser,
+            ".hdl.handle.net/11600": UNIFESPParser,
             '.animaeducacao.com.br': UNIFGParser,
             '.ufes.br': UfesParser,
             '.ufrn.br': UfrnParser,
@@ -143,8 +138,6 @@ class ParserFactory:
             ".riuff": UFFParser,
             ".pucgoias.edu.br": PUCGOIASParser,
             ".ufrr.br": UFRRParser,            
-            ".unifesp.br": UNIFESPParser,
-            ".hdl.handle.net/11600": UNIFESPParser,
             ".deposita.ibict.br": UNIFACSParser,
             ".unifacs.br": UNIFACSParser,
             ".uel.br": UelParser,
@@ -153,8 +146,15 @@ class ParserFactory:
             '.ufsc.br': UfscParser,            
             '.ufg.br': UfgParser,
             '.ufpr.br': UfprParser,
+            'hdl.handle.net/1884': UfprParser,  # Handle específico da UFPR
             '.repositorio.jesuita.org.br': UnisinosParser,
-            '.unisinos.br': UnisinosParser,                        
+            '.unisinos.br': UnisinosParser,
+            
+            # --- Mapeamento para Sistema Sophia (Multi-instituição) ---
+            'biblioteca.sophia.com.br/terminalri/9575': UniforParser, # UNIFOR
+            'unifor.br': UniforParser,
+            '.unicamp.br': UnicampParser,
+            'hdl.handle.net/20.500.12733': UnicampParser,
         }
 
     def get_parser(self, url, html_content=None):

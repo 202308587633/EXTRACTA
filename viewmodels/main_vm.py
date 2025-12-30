@@ -535,3 +535,7 @@ class MainViewModel:
             
             # Intervalo de segurança contra bloqueios (Bot protection)
             time.sleep(1)
+
+    def get_research_row(self, res_id):
+        """Retorna uma única linha formatada do banco de dados."""
+        return self.db.fetch_research_record(res_id)
