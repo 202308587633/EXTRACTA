@@ -19,25 +19,19 @@ class ResearchTab(ctk.CTkFrame):
         self._configure_layout_container()
         self._setup_styles()
         self._build_action_bar()
+        self._build_filter_bar()
         self._build_data_grid()
         self._setup_bindings()
         self.load_research_data()
 
     def load_research_data(self):
-        """Carrega os resultados da ViewModel e atualiza a interface."""
-        # Limpa dados antigos
-        for item in self.tree.get_children(): 
-            self.tree.delete(item)
+        if hasattr(self, 'filter_vars'):
+             current_filters = {key: var.get() for key, var in self.filter_vars.items()}
+        else:
+             current_filters = {}
         
-        data = self.vm.get_research_results()
-        for row in data:
-            # Processa as 10 colunas garantindo '-' em campos vazios
-            processed_row = [str(val) if val and str(val).strip() != "" else "-" for val in row]
-            self.tree.insert("", "end", values=processed_row)
-            
-        # Sincroniza a lista de URLs (Raízes) sempre que os dados mudam
-        if self.update_url_roots_list:
-            self.update_url_roots_list()
+        rows = self.vm.filter_researches(current_filters)
+        self._populate_treeview(rows)
 
     def sort_treeview(self, col, reverse):
         """Ordena o conteúdo da Treeview ao clicar no título da coluna."""
@@ -314,3 +308,62 @@ class ResearchTab(ctk.CTkFrame):
 
     def update_status_ui(self, message):
         print(f"[UI UPDATE] {message}")
+
+    def _build_filter_bar(self):
+        self.filter_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.filter_frame.pack(fill="x", padx=10, pady=(0, 5))
+
+        self.filter_vars = {}
+        filters = [
+            ("HTML Buscador", "html_busc"),
+            ("HTML Repositório", "html_repo"),
+            ("Sigla", "sigla"),
+            ("Universidade", "univ"),
+            ("Programa", "prog")
+        ]
+
+        for label_text, key in filters:
+            container = ctk.CTkFrame(self.filter_frame, fg_color="transparent")
+            container.pack(side="left", padx=2, expand=True)
+            
+            lbl = ctk.CTkLabel(container, text=label_text, font=("Roboto", 10, "bold"), text_color="silver")
+            lbl.pack(pady=(0, 0))
+            
+            var = ctk.StringVar(value="Indiferente")
+            self.filter_vars[key] = var
+            
+            opt = ctk.CTkOptionMenu(
+                container, 
+                values=["Indiferente", "Sim", "Não"],
+                variable=var,
+                width=100,
+                height=22,
+                font=("Roboto", 11),
+                fg_color="#333333",
+                button_color="#444444",
+                command=self.apply_filters
+            )
+            opt.pack()
+
+        self.btn_filter = ctk.CTkButton(
+            self.filter_frame,
+            text="🔎 Filtrar",
+            width=80,
+            height=24,
+            fg_color="#1f6aa5",
+            command=self.apply_filters
+        )
+        self.btn_filter.pack(side="left", padx=10, pady=10)
+
+    def apply_filters(self, _=None):
+        current_filters = {key: var.get() for key, var in self.filter_vars.items()}
+        rows = self.vm.filter_researches(current_filters)
+        self._populate_treeview(rows)
+
+    def _populate_treeview(self, rows):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        for row in rows:
+            display_values = row[1:]
+            self.tree.insert("", "end", values=display_values, tags=(row[0],))

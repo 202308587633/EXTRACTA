@@ -634,3 +634,11 @@ class MainViewModel:
         except Exception as e:
             self.db.log_event(f"Falha ao processar ID {res_id}: {e}")
             return False
+
+    def filter_researches(self, filters_dict):
+        try:
+            raw_data = self.db.fetch_filtered_researches(filters_dict)
+            return raw_data
+        except Exception as e:
+            self.db.log_event(f"Erro ao filtrar pesquisas: {str(e)}")
+            return []

@@ -288,3 +288,36 @@ class DatabaseHandler:
                OR (html_buscador IS NOT NULL AND html_buscador != '' AND html_buscador != '-')
         """)
         return [row[0] for row in cursor.fetchall()]
+
+    def fetch_filtered_researches(self, filters):
+        base_query = """
+            SELECT id, titulo, autor, link_buscador, link_repositorio, 
+                   sigla_univ, nome_univ, programa, link_pdf, 
+                   termo_pesquisado, ano_pesquisado 
+            FROM pesquisas_extraidas WHERE 1=1
+        """
+        params = []
+        
+        field_map = {
+            'html_busc': 'html_buscador',
+            'html_repo': 'html_repositorio',
+            'sigla': 'sigla_univ',
+            'univ': 'nome_univ',
+            'prog': 'programa'
+        }
+
+        for key, value in filters.items():
+            if value == 'Indiferente':
+                continue
+            
+            col = field_map.get(key)
+            if not col: continue
+
+            if value == 'Sim':
+                base_query += f" AND {col} IS NOT NULL AND {col} != '' AND {col} != '-'"
+            elif value == 'Não':
+                base_query += f" AND ({col} IS NULL OR {col} = '' OR {col} = '-')"
+
+        cursor = self.conn.cursor()
+        cursor.execute(base_query, params)
+        return cursor.fetchall()
