@@ -63,19 +63,25 @@ class HistoryTab(ctk.CTkFrame):
         self.load_history_list()
 
     def load_history_list(self):
+        """Carrega a lista de histórico com limpeza segura dos widgets."""
         if not self.list_frame.winfo_exists():
             return
 
+        # 1. Limpeza segura: Remove do layout antes de destruir
         for btn in self.history_buttons:
             if btn.winfo_exists():
-                btn.destroy()
+                btn.pack_forget() # Remove visualmente para evitar redraws
+                btn.destroy()     # Destrói o objeto
         self.history_buttons.clear()
 
+        # 2. Busca dados atualizados
         data = self.vm.get_history()
         if not data:
             return
 
+        # 3. Recria a lista
         for row in data:
+            # row: (rowid, termo, data_coleta, html_source, pagina)
             display_text = f"Pág {row[4]}: {row[1][:20]}..."
             
             btn = ctk.CTkButton(
@@ -87,6 +93,7 @@ class HistoryTab(ctk.CTkFrame):
             )
             btn.pack(fill="x", pady=2)
             
+            # Bind para botão direito (Menu de Contexto)
             btn.bind("<Button-3>", lambda e, rid=row[0], rt=row[1], rp=row[4]: 
                      self.show_context_menu(e, rid, rt, rp))
             

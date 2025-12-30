@@ -252,9 +252,18 @@ class ResearchTab(ctk.CTkFrame):
         self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.action_frame.pack(fill="x", padx=10, pady=(10, 5))
 
+        self.btn_download_all = ctk.CTkButton(
+            self.action_frame,
+            text="📥 Baixar HTML dos Repositórios",
+            fg_color="#1f6aa5",
+            height=30,
+            command=self.trigger_batch_download
+        )
+        self.btn_download_all.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
         self.btn_process_all = ctk.CTkButton(
             self.action_frame,
-            text="⚙️ Processar Metadados em Lote",
+            text="⚙️ Fazer Scrap (Parse) de Todas as Pesquisas",
             fg_color="#2b7a78",
             hover_color="#17252a",
             height=30,
@@ -367,3 +376,14 @@ class ResearchTab(ctk.CTkFrame):
         for row in rows:
             display_values = row[1:]
             self.tree.insert("", "end", values=display_values, tags=(row[0],))
+
+    def trigger_batch_download(self):
+        self.btn_download_all.configure(state="disabled", text="Baixando...")
+        self.vm.batch_download_repository_html(
+            on_status_change=self.update_status_ui,
+            callback_refresh=self.on_download_finish
+        )
+
+    def on_download_finish(self):
+        self.load_research_data()
+        self.after(0, lambda: self.btn_download_all.configure(state="normal", text="📥 Baixar HTML dos Repositórios"))

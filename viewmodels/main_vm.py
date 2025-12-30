@@ -93,16 +93,41 @@ class MainViewModel:
         except Exception:
             return html_content
 
-    def process_pagination(self, rowid, on_status_change, callback_refresh):
-        """Refatorado para utilizar a lógica centralizada de paginação."""
+    def process_pagination(self, row_id, on_status_change, callback_refresh):
         def task():
             try:
-                self._internal_pagination_logic(rowid, on_status_change)
-                self._update_step("Paginação individual finalizada.", on_status_change)
-                if callback_refresh: 
-                    callback_refresh()
+                record = self.db.get_scrape_by_id(row_id)
+                if not record:
+                    self._update_step("Registro não encontrado.", on_status_change)
+                    return
+
+                termo = record[1]
+                html_page_1 = record[3]
+                
+                total_pages = self.scraper.detect_total_pages(html_page_1) 
+                
+                if total_pages <= 1:
+                    self._update_step(f"Apenas 1 página encontrada para '{termo}'. Nada a fazer.", on_status_change)
+                    return
+
+                self._update_step(f"Encontradas {total_pages} páginas para '{termo}'. Baixando...", on_status_change)
+
+                for page_num in range(2, total_pages + 1):
+                    self._update_step(f"Baixando página {page_num}/{total_pages}...", on_status_change)
+                    
+                    new_html = self.scraper.download_page(termo, page=page_num)
+                    
+                    if new_html:
+                        self.db.insert_scrape(termo, new_html, page_num)
+                    else:
+                        self._update_step(f"Falha ao baixar pág {page_num}.", on_status_change)
+
+                self._update_step("Paginação concluída!", on_status_change)
+                if callback_refresh: callback_refresh()
+
             except Exception as e:
-                self._update_step(f"Erro na paginação: {str(e)}", on_status_change)
+                self.db.log_event(f"Erro paginação ID {row_id}: {str(e)}")
+                self._update_step(f"Erro: {str(e)}", on_status_change)
 
         threading.Thread(target=task, daemon=True).start()
 
@@ -441,27 +466,41 @@ class MainViewModel:
         if extracted_to_db:
             self.db.insert_extracted_data(extracted_to_db)
 
-    def batch_process_pagination(self, row_ids, on_status_change, callback_refresh):
-        """
-        Executa a busca de todas as páginas para uma lista de registros (Lote).
-        Processa sequencialmente para evitar bloqueios do servidor.
-        """
-        def batch_task():
-            total = len(row_ids)
-            try:
-                for index, rid in enumerate(row_ids, 1):
-                    self._update_step(f"Lote Paginação: Expandindo item {index} de {total}...", on_status_change)
-                    # Executa a lógica de forma síncrona dentro da thread do lote
-                    self._internal_pagination_logic(rid, on_status_change)
-                
-                self._update_step(f"Paginação em lote finalizada! {total} buscas processadas.", on_status_change)
-                if callback_refresh:
-                    # O CustomTkinter gerencia a atualização da lista
-                    callback_refresh()
-            except Exception as e:
-                self.db.log_event(f"Erro no processamento em lote: {str(e)}")
+    def batch_process_pagination(self, row_ids_list, on_status_change, callback_refresh):
+        def task():
+            total_items = len(row_ids_list)
+            for idx, row_id in enumerate(row_ids_list, 1):
+                try:
+                    record = self.db.get_scrape_by_id(row_id)
+                    if not record: continue
+                    
+                    termo = record[1]
+                    page_idx = record[4] 
+                    
+                    if page_idx != 1:
+                        continue
 
-        threading.Thread(target=batch_task, daemon=True).start()
+                    self._update_step(f"[{idx}/{total_items}] Analisando paginação: {termo}...", on_status_change)
+                    
+                    html_page_1 = record[3]
+                    total_pages = self.scraper.detect_total_pages(html_page_1)
+
+                    if total_pages > 1:
+                        for p in range(2, total_pages + 1):
+                            self._update_step(f"   > Baixando pág {p}/{total_pages}...", on_status_change)
+                            html = self.scraper.download_page(termo, page=p)
+                            if html:
+                                self.db.insert_scrape(termo, html, p)
+                    else:
+                        self._update_step(f"   > Pesquisa única (sem paginação extra).", on_status_change)
+                        
+                except Exception as e:
+                    self.db.log_event(f"Erro lote paginação ID {row_id}: {e}")
+
+            self._update_step("Lote de paginação finalizado.", on_status_change)
+            if callback_refresh: callback_refresh()
+
+        threading.Thread(target=task, daemon=True).start()
 
     def _internal_pagination_logic(self, rowid, on_status_change):
         """Lógica central de paginação para reuso (Individual e Lote)."""
@@ -644,12 +683,78 @@ class MainViewModel:
             return []
 
     def delete_record(self, rowid, termo, callback_refresh):
-        """Exclui um registro do histórico e atualiza a interface."""
         try:
             self.db.delete_scrape(rowid)
             self.db.log_event(f"Registro '{termo}' (ID {rowid}) excluído.")
-            if callback_refresh:
-                callback_refresh()
         except Exception as e:
-            self.db.log_event(f"Erro ao excluir registro ID {rowid}: {str(e)}")
-    
+            self.db.log_event(f"Aviso ao excluir ID {rowid}: {str(e)}")
+        finally:
+            if callback_refresh:
+                try:
+                    callback_refresh()
+                except Exception:
+                    pass
+
+    def batch_download_repository_html(self, on_status_change, callback_refresh):
+        """
+        Crawler de 2ª Etapa:
+        Baixa o HTML final do repositório para todas as pesquisas que ainda não o possuem.
+        """
+        def task():
+            try:
+                # 1. Busca itens que precisam de download
+                # Critério: Tem link_repositorio mas não tem html_repositorio
+                # Ou: Tem link_buscador mas não tem link_repositorio (caso o link direto seja o do buscador)
+                cursor = self.db.conn.cursor()
+                cursor.execute("""
+                    SELECT id, link_buscador, link_repositorio 
+                    FROM pesquisas_extraidas 
+                    WHERE (html_repositorio IS NULL OR html_repositorio = '')
+                    AND (link_repositorio IS NOT NULL OR link_buscador IS NOT NULL)
+                """)
+                rows = cursor.fetchall()
+                total = len(rows)
+
+                if total == 0:
+                    self._update_step("Todos os registros já possuem HTML baixado.", on_status_change)
+                    return
+
+                self._update_step(f"Iniciando download de HTML para {total} registros...", on_status_change)
+                
+                scraper = WebScraper() # Instância local para thread
+                success_count = 0
+
+                for i, (rid, l_busc, l_repo) in enumerate(rows, 1):
+                    # Define qual link usar (Prioridade: Repositório > Buscador)
+                    target_url = l_repo if (l_repo and 'http' in l_repo) else l_busc
+                    
+                    if not target_url or 'http' not in target_url:
+                        continue
+
+                    self._update_step(f"[{i}/{total}] Baixando: {target_url[:40]}...", on_status_change)
+                    
+                    try:
+                        # Download real
+                        html = scraper.download_page(target_url)
+                        
+                        if html and len(html) > 100:
+                            # Atualiza no banco
+                            self.db.update_html_content(rid, html, is_repository=True)
+                            success_count += 1
+                        else:
+                            self.db.log_event(f"Falha download ID {rid}: HTML vazio")
+                            
+                    except Exception as e:
+                        self.db.log_event(f"Erro download ID {rid}: {e}")
+                    
+                    # Pausa educada para não bloquear o servidor (opcional)
+                    time.sleep(0.5)
+
+                self._update_step(f"Download em lote concluído! {success_count} arquivos salvos.", on_status_change)
+                if callback_refresh: callback_refresh()
+
+            except Exception as e:
+                self.db.log_event(f"Erro Crítico Download Lote: {e}")
+                self._update_step(f"Erro no Download: {str(e)}", on_status_change)
+
+        threading.Thread(target=task, daemon=True).start()
