@@ -16,82 +16,11 @@ class ResearchTab(ctk.CTkFrame):
         self.setup_ui()
 
     def setup_ui(self):
-        self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.action_frame.pack(fill="x", padx=10, pady=(10, 5))
-
-        self.btn_process_all = ctk.CTkButton(
-            self.action_frame,
-            text="⚙️ Processar Metadados em Lote (Parsers)",
-            fg_color="#2b7a78",
-            hover_color="#17252a",
-            height=30,
-            command=self.trigger_batch_parser
-        )
-        self.btn_process_all.pack(side="left", fill="x", expand=True, padx=(0, 5))
-
-        self.btn_refresh = ctk.CTkButton(
-            self.action_frame,
-            text="🔄 Recarregar Tabela",
-            fg_color="#555555",
-            height=30,
-            width=150,
-            command=self.load_research_data
-        )
-        self.btn_refresh.pack(side="right")
-
-        style = ttk.Style()
-        style.theme_use("default")
-        
-        style.configure("Treeview",
-            background="#2b2b2b",
-            foreground="white",
-            fieldbackground="#2b2b2b",
-            borderwidth=0,
-            rowheight=25,
-            font=("Roboto", 10))
-            
-        style.map("Treeview", background=[('selected', '#1f6aa5')])
-        
-        style.configure("Treeview.Heading",
-            background="#1a1a1a",
-            foreground="silver",
-            relief="flat",
-            font=("Roboto", 10, "bold"))
-            
-        style.map("Treeview.Heading", background=[('active', '#252525')])
-
-        self.res_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.res_container.pack(fill="both", expand=True, padx=10, pady=5)
-        
-        cols = ("titulo", "autor", "link_busc", "link_repo", "sigla", "univ", "prog", "pdf", "termo", "ano")
-        self.tree = ttk.Treeview(self.res_container, columns=cols, show="headings")
-        
-        headers = {
-            "titulo": "Pesquisa", "autor": "Autor", "link_busc": "Buscador", 
-            "link_repo": "Repos.", "sigla": "Sigla", "univ": "Univ", 
-            "prog": "Programa", "pdf": "PDF", "termo": "Termo Busca", "ano": "Ano Filtro"
-        }
-        
-        for col, text in headers.items():
-            self.tree.heading(col, text=text, command=lambda c=col: self.sort_treeview(c, False))
-            width = 90 if col in ["termo", "ano", "sigla", "pdf"] else 120
-            self.tree.column(col, width=width)
-        
-        vsb = ttk.Scrollbar(self.res_container, orient="vertical", command=self.tree.yview)
-        hsb = ttk.Scrollbar(self.res_container, orient="horizontal", command=self.tree.xview)
-        
-        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
-        
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        
-        self.res_container.grid_rowconfigure(0, weight=1)
-        self.res_container.grid_columnconfigure(0, weight=1)
-        
-        self.research_menu = tk.Menu(self, tearoff=0)
-        self.tree.bind("<Button-3>", self.show_research_context_menu)
-        
+        self._configure_layout_container()
+        self._setup_styles()
+        self._build_action_bar()
+        self._build_data_grid()
+        self._setup_bindings()
         self.load_research_data()
 
     def load_research_data(self):
@@ -291,7 +220,6 @@ class ResearchTab(ctk.CTkFrame):
 
     def trigger_batch_parser(self):
         self.btn_process_all.configure(state="disabled", text="Processando...")
-        
         self.vm.batch_extract_university_info(
             on_status_change=self.update_status_ui,
             callback_refresh=self.on_batch_finish
@@ -299,4 +227,90 @@ class ResearchTab(ctk.CTkFrame):
 
     def on_batch_finish(self):
         self.load_research_data()
-        self.after(0, lambda: self.btn_process_all.configure(state="normal", text="⚙️ Processar Metadados em Lote (Parsers)"))
+        self.after(0, lambda: self.btn_process_all.configure(state="normal", text="⚙️ Processar Metadados em Lote"))
+
+    def _configure_layout_container(self):
+        self.pack(fill="both", expand=True)
+
+    def _setup_styles(self):
+        style = ttk.Style()
+        style.theme_use("default")
+        
+        style.configure("Treeview",
+            background="#2b2b2b",
+            foreground="white",
+            fieldbackground="#2b2b2b",
+            borderwidth=0,
+            rowheight=25,
+            font=("Roboto", 10)
+        )
+        style.map("Treeview", background=[('selected', '#1f6aa5')])
+        
+        style.configure("Treeview.Heading",
+            background="#1a1a1a",
+            foreground="silver",
+            relief="flat",
+            font=("Roboto", 10, "bold")
+        )
+        style.map("Treeview.Heading", background=[('active', '#252525')])
+
+    def _build_action_bar(self):
+        self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.action_frame.pack(fill="x", padx=10, pady=(10, 5))
+
+        self.btn_process_all = ctk.CTkButton(
+            self.action_frame,
+            text="⚙️ Processar Metadados em Lote",
+            fg_color="#2b7a78",
+            hover_color="#17252a",
+            height=30,
+            command=self.trigger_batch_parser
+        )
+        self.btn_process_all.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        self.btn_refresh = ctk.CTkButton(
+            self.action_frame,
+            text="🔄 Recarregar",
+            fg_color="#555555",
+            height=30,
+            width=150,
+            command=self.load_research_data
+        )
+        self.btn_refresh.pack(side="right")
+
+    def _build_data_grid(self):
+        self.res_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.res_container.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        cols = ("titulo", "autor", "link_busc", "link_repo", "sigla", "univ", "prog", "pdf", "termo", "ano")
+        self.tree = ttk.Treeview(self.res_container, columns=cols, show="headings")
+        
+        headers = {
+            "titulo": "Pesquisa", "autor": "Autor", "link_busc": "Buscador", 
+            "link_repo": "Repos.", "sigla": "Sigla", "univ": "Univ", 
+            "prog": "Programa", "pdf": "PDF", "termo": "Termo Busca", "ano": "Ano Filtro"
+        }
+        
+        for col, text in headers.items():
+            self.tree.heading(col, text=text, command=lambda c=col: self.sort_treeview(c, False))
+            width = 90 if col in ["termo", "ano", "sigla", "pdf"] else 120
+            self.tree.column(col, width=width)
+        
+        vsb = ttk.Scrollbar(self.res_container, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(self.res_container, orient="horizontal", command=self.tree.xview)
+        
+        self.tree.configure(yscroll=vsb.set, xscroll=hsb.set)
+        
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        
+        self.res_container.grid_rowconfigure(0, weight=1)
+        self.res_container.grid_columnconfigure(0, weight=1)
+
+    def _setup_bindings(self):
+        self.research_menu = tk.Menu(self, tearoff=0)
+        self.tree.bind("<Button-3>", self.show_research_context_menu)
+
+    def update_status_ui(self, message):
+        print(f"[UI UPDATE] {message}")
