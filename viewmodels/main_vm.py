@@ -38,41 +38,40 @@ class MainViewModel:
         if callback:
             callback(message)
 
-    def perform_scrape(self, url, on_status_change, on_error):
+    def perform_scrape(self, url, termo_amigavel, ano_selecionado, on_status_change, on_error):
+        """
+        Realiza o scrap gravando o texto amigável da Combobox e o ano no histórico.
+        """
         def task():
             try:
-                self._update_step("Validando URL...", on_status_change)
+                self._update_step(f"Validando busca: {termo_amigavel}...", on_status_change)
                 if not url.strip():
-                    raise ValueError("A URL não pode estar vazia.")
+                    raise ValueError("A URL de destino não pode estar vazia.")
 
-                full_url = url if url.startswith(('http://', 'https://')) else 'https://' + url
-                
-                parsed = urlparse(full_url)
-                engine = parsed.netloc if parsed.netloc else "website"
-                ano = datetime.now().year
+                engine = "BDTD" # Identificador fixo para o buscador principal
 
-                self._update_step(f"Baixando conteúdo de {engine}...", on_status_change)
+                self._update_step(f"Baixando conteúdo da BDTD ({ano_selecionado})...", on_status_change)
                 
-                # CORREÇÃO: Instancia o scraper e usa download_page
                 scraper = WebScraper()
-                html = scraper.download_page(full_url, on_progress=on_status_change)
+                html = scraper.download_page(url, on_progress=on_status_change)
                 
                 if not html:
-                    raise Exception("Falha ao capturar o HTML da página inicial.")
+                    raise Exception("Falha ao capturar o HTML da página inicial da BDTD.")
 
-                self._update_step("Gravando HTML no banco...", on_status_change)
+                self._update_step("Persistindo busca no histórico...", on_status_change)
+                # Grava o termo amigável da Combobox em vez da URL longa
                 self.db.insert_scrape(
                     engine=engine,
-                    termo=full_url,
-                    ano=str(ano),
+                    termo=termo_amigavel,
+                    ano=str(ano_selecionado),
                     pagina=1,
                     html_source=html,
-                    link_busca=full_url
+                    link_busca=url
                 )
-                self._update_step(f"Processo finalizado com sucesso!", on_status_change)
+                self._update_step(f"Captura de '{termo_amigavel}' finalizada!", on_status_change)
             except Exception as e:
                 erro_msg = str(e)
-                self.db.log_event(f"ERRO: {erro_msg}")
+                self.db.log_event(f"ERRO NO SCRAPE: {erro_msg}")
                 on_error(erro_msg)
 
         threading.Thread(target=task, daemon=True).start()
@@ -157,49 +156,49 @@ class MainViewModel:
         return match.group(1).strip() if match else None
    
     def extract_research_data(self, rowid, on_status_change, on_error, callback_refresh):
+        """
+        Processa o histórico bruto para a tabela de pesquisas.
+        Popula as 10 colunas, incluindo Termo e Ano originais da busca.
+        """
         def task():
             try:
-                self._update_step("Analisando HTML da página...", on_status_change)
+                self._update_step("Analisando estrutura do HTML...", on_status_change)
                 record = self.db.get_scrape_full_details(rowid)
                 if not record: return
                 
-                html_content = record[4]
+                # record: (engine, termo_orig, ano_orig, pagina, html)
+                termo_orig, ano_orig, html_content = record[1], record[2], record[4]
                 soup = BeautifulSoup(html_content, 'html.parser')
                 results = soup.select('.result.card-results')
 
                 extracted_to_db = []
                 for res in results:
-                    # 1. Título e Link do Buscador (dentro da tag h2 > a)
                     title_tag = res.select_one('h2 a.title')
                     titulo = title_tag.get_text(strip=True) if title_tag else "-"
-                    link_buscador = title_tag['href'] if title_tag else "-"
-                    if link_buscador.startswith('/'):
-                        link_buscador = "https://bdtd.ibict.br" + link_buscador
+                    l_busc = title_tag['href'] if title_tag else "-"
+                    if l_busc.startswith('/'): 
+                        l_busc = "https://bdtd.ibict.br" + l_busc
 
-                    # 2. Autor (link que contém /Author/ no href)
-                    author_tag = res.select_one('a[href*="/Author/"]')
-                    autor = author_tag.get_text(strip=True) if author_tag else "-"
-
-                    # 3. Link do Repositório (expressão "Acessar documento")
+                    autor = res.select_one('a[href*="/Author/"]').get_text(strip=True) if res.select_one('a[href*="/Author/"]') else "-"
                     repo_tag = res.find('a', string=lambda s: s and "Acessar documento" in s)
-                    link_repositorio = repo_tag['href'] if repo_tag else "-"
+                    l_repo = repo_tag['href'] if repo_tag else "-"
 
-                    extracted_to_db.append((titulo, autor, link_buscador, link_repositorio, rowid))
+                    # 7 valores: titulo, autor, link_busc, link_repo, rowid, termo, ano
+                    extracted_to_db.append((titulo, autor, l_busc, l_repo, rowid, termo_orig, ano_orig))
 
                 if extracted_to_db:
                     self.db.insert_extracted_data(extracted_to_db)
-                    self._update_step(f"Extraídos {len(extracted_to_db)} itens com sucesso.", on_status_change)
+                    self._update_step(f"Sucesso: {len(extracted_to_db)} pesquisas extraídas.", on_status_change)
                 
                 if callback_refresh: callback_refresh()
-
             except Exception as e:
-                self.db.log_event(f"Erro na extração: {str(e)}")
+                self.db.log_event(f"Erro na extração inteligênte: {str(e)}")
                 if on_error: on_error(str(e))
 
         threading.Thread(target=task, daemon=True).start()
 
     def get_research_results(self):
-        """Retorna os resultados da tabela de pesquisas (agora com 8 colunas)."""
+        """Retorna os resultados da tabela de pesquisas processando agora as 10 colunas."""
         return self.db.fetch_extracted_data()
 
     def scrape_buscador_link(self, pesquisa_id, url, on_status_change, callback_display):
@@ -367,38 +366,33 @@ class MainViewModel:
 
     def extract_from_search_engine(self, res_id, on_status_change, callback_refresh):
         """
-        Extrai Sigla, Universidade, Programa e Link do Repositório 
-        diretamente do HTML da BDTD (Guia 4).
+        Acionada pelo menu de contexto. Extrai dados institucionais 
+        diretamente do HTML da BDTD salvo na Guia 4.
         """
         def task():
             try:
-                # 1. Recupera o HTML do buscador salvo no banco de dados
                 html = self.db.get_html_buscador(res_id)
                 url = self.db.get_link_by_id(res_id) 
 
                 if not html:
-                    self._update_step("Erro: HTML do buscador não encontrado no banco.", on_status_change)
+                    self._update_step("Erro: Faça o Scrap do Buscador primeiro.", on_status_change)
                     return
 
-                self._update_step("Analisando metadados da BDTD...", on_status_change)
+                self._update_step("BDTD: Analisando metadados institucional...", on_status_change)
                 
-                # 2. Obtém o BDTDParser através da detecção de conteúdo na Factory
+                # A factory selecionará o BDTDParser (VuFind)
                 parser = self.factory.get_parser(url, html)
-                
-                # 3. Extrai os dados institucionais e o link original
                 data = parser.extract_pure_soup(html, url)
                 
-                # 4. Grava os novos dados (Sigla, Univ, Programa e Link PDF/Repo) no banco
+                # Atualiza Sigla, Univ, Programa e Link PDF no banco
                 self.db.update_parser_data(res_id, data)
                 
-                # 5. Notifica sucesso com a sigla encontrada (ex: UDF)
-                self._update_step(f"Sucesso: Dados de {data.get('sigla')} extraídos do buscador.", on_status_change)
-                if callback_refresh: 
-                    callback_refresh()
+                self._update_step(f"Sucesso: {data.get('sigla')} identificado.", on_status_change)
+                if callback_refresh: callback_refresh()
 
             except Exception as e:
-                self.db.log_event(f"Erro no menu de contexto (Buscador): {str(e)}")
-                self._update_step(f"Falha na extração: {str(e)}", on_status_change)
+                self.db.log_event(f"Erro no parser do buscador: {str(e)}")
+                self._update_step(f"Falha: {str(e)}", on_status_change)
 
         threading.Thread(target=task, daemon=True).start()
 
@@ -425,7 +419,7 @@ class MainViewModel:
             print(f"Erro ao abrir HTML no navegador: {e}")
 
     def get_unique_domains(self):
-        """Retorna lista de domínios únicos ordenados alfabeticamente."""
+        """Retorna domínios únicos em ORDEM ALFABÉTICA."""
         try:
             links = self.db.get_all_repository_links()
             domains = set()
@@ -433,20 +427,27 @@ class MainViewModel:
                 if link and link != "-":
                     domain = urlparse(link).netloc
                     if domain: domains.add(domain)
-            return sorted(list(domains)) # ORDEM ALFABÉTICA SOLICITADA
+            return sorted(list(domains)) # ORDEM ALFABÉTICA
         except Exception as e:
             self.db.log_event(f"Erro ao obter domínios: {e}")
             return []
 
     def open_html_in_browser(self, res_id, source="buscador"):
-        """Recupera o HTML do banco e abre no navegador via arquivo temporário."""
-        html = self.db.get_html_buscador(res_id) if source == "buscador" else self.db.get_html_repositorio(res_id)
-        if not html: return False
-        
+        """
+        Unifica a abertura de HTML do banco no navegador padrão (Chrome/Edge/etc).
+        Recupera o conteúdo da Guia 4 ou 5 e utiliza arquivo temporário seguro.
+        """
         try:
-            with tempfile.NamedTemporaryFile('w', delete=False, suffix='.html', encoding='utf-8') as f:
-                f.write(html)
-                temp_path = f.name
-            webbrowser.open(f"file://{os.path.abspath(temp_path)}")
+            html = self.db.get_html_buscador(res_id) if source == "buscador" else self.db.get_html_repositorio(res_id)
+            
+            if not html:
+                self.db.log_event(f"Aviso: Conteúdo de {source} não disponível no banco para ID {res_id}.")
+                return False
+
+            # Usa o método interno de criação de arquivo temporário
+            self._open_temp_html(html, f"{source}_{res_id}")
+            self.db.log_event(f"Conteúdo de {source} aberto no navegador.")
             return True
-        except Exception: return False
+        except Exception as e:
+            self.db.log_event(f"Falha na visualização externa: {str(e)}")
+            return False
