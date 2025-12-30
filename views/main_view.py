@@ -76,16 +76,36 @@ class MainView(ctk.CTk):
         self.status_label.pack(pady=5)
 
     def _setup_history_tab(self):
+        """Configura a aba Histórico com o novo botão de extração em lote."""
         self.history_container = ctk.CTkFrame(self.tab_data)
         self.history_container.pack(fill="both", expand=True, padx=5, pady=5)
+        
         self.list_frame = ctk.CTkScrollableFrame(self.history_container, width=220, label_text="Capturas")
         self.list_frame.pack(side="left", fill="y", padx=(0, 5))
+        
         self.content_frame = ctk.CTkFrame(self.history_container)
         self.content_frame.pack(side="right", fill="both", expand=True)
-        self.btn_refresh = ctk.CTkButton(self.content_frame, text="Atualizar Lista", command=self.load_history_list, height=25)
-        self.btn_refresh.pack(fill="x", padx=5, pady=5)
+        
+        # Frame para botões de ação superiores
+        self.action_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        self.action_frame.pack(fill="x", padx=5, pady=5)
+
+        self.btn_refresh = ctk.CTkButton(self.action_frame, text="🔄 Atualizar Lista", command=self.load_history_list, height=28)
+        self.btn_refresh.pack(side="left", fill="x", expand=True, padx=2)
+
+        # NOVO BOTÃO: Executa a extração para todas as páginas listadas
+        self.btn_extract_all = ctk.CTkButton(
+            self.action_frame, 
+            text="📥 Extrair Tudo para Pesquisas", 
+            fg_color="#1f6aa5", 
+            command=self.trigger_batch_extraction,
+            height=28
+        )
+        self.btn_extract_all.pack(side="left", fill="x", expand=True, padx=2)
+
         self.txt_content = ctk.CTkTextbox(self.content_frame, wrap="word", font=("Consolas", 12))
         self.txt_content.pack(fill="both", expand=True, padx=5, pady=5)
+        
         self.context_menu = tk.Menu(self, tearoff=0)
         self.load_history_list()
 
@@ -134,13 +154,17 @@ class MainView(ctk.CTk):
         self.vm.perform_scrape(url, termo_amigavel, ano_selecionado, self.update_status_ui, self.on_error)
 
     def update_status_ui(self, message):
-        self.status_label.configure(text=message)
-        if "finalizado" in message.lower() or "processadas" in message.lower():
-            self.btn_scrape.configure(state="normal")
-            self.load_history_list()
+        """Atualiza a interface de forma segura na thread principal."""
+        # Agenda a atualização para evitar conflitos com widgets sendo destruídos
+        self.after(0, lambda: self._safe_update_status(message))
 
     def on_error(self, error_msg):
+        """Reabilita os botões em caso de falha."""
         self.btn_scrape.configure(state="normal")
+        
+        if hasattr(self, 'btn_extract_all'):
+            self.btn_extract_all.configure(state="normal", text="📥 Extrair Tudo para Pesquisas")
+            
         self.status_label.configure(text=f"Erro: {error_msg}", text_color="red")
 
     def open_log_viewer(self):
@@ -156,14 +180,37 @@ class MainView(ctk.CTk):
         txt_logs.configure(state="disabled")
 
     def load_history_list(self):
-        for widget in self.list_frame.winfo_children(): widget.destroy()
+        """Carrega a lista de histórico limpando widgets de forma segura."""
+        if not hasattr(self, 'list_frame') or not self.list_frame.winfo_exists():
+            return
+
+        # Limpa os widgets atuais
+        for widget in self.list_frame.winfo_children():
+            widget.destroy()
+
         data = self.vm.get_history()
+        if not data:
+            return
+
         for row in data:
-            display_text = f"Pág {row[4]}: {row[1][:20]}..."
-            btn = ctk.CTkButton(self.list_frame, text=display_text, fg_color="transparent", border_width=1,
-                                command=lambda r=row: self.display_content(r))
-            btn.pack(fill="x", pady=2)
-            btn.bind("<Button-3>", lambda e, rid=row[0], rt=row[1], rp=row[4]: self.show_context_menu(e, rid, rt, rp))
+            try:
+                # Usa rowid (row[0]), termo (row[1]) e página (row[4])
+                display_text = f"Pág {row[4]}: {row[1][:20]}..."
+                
+                btn = ctk.CTkButton(
+                    self.list_frame, 
+                    text=display_text, 
+                    fg_color="transparent", 
+                    border_width=1,
+                    command=lambda r=row: self.display_content(r)
+                )
+                btn.pack(fill="x", pady=2)
+                
+                # Bind para menu de contexto
+                btn.bind("<Button-3>", lambda e, rid=row[0], rt=row[1], rp=row[4]: 
+                         self.show_context_menu(e, rid, rt, rp))
+            except Exception as e:
+                print(f"Erro ao renderizar botão de histórico: {e}")
 
     def load_research_data(self):
         """Carrega os dados e popula as 10 colunas (incluindo Termo e Ano)."""
@@ -398,3 +445,36 @@ class MainView(ctk.CTk):
         full_url = f"{base}?{urllib.parse.urlencode(params, safe='[]')}"
         self.url_entry.delete(0, "end")
         self.url_entry.insert(0, full_url)
+
+    def trigger_batch_extraction(self):
+        """Coleta todos os IDs do histórico e inicia a extração em lote via ViewModel."""
+        data = self.vm.get_history() # Retorna rowid, termo, data, html, pagina
+        if not data:
+            self.on_error("Nenhuma captura disponível no histórico.")
+            return
+
+        row_ids = [row[0] for row in data]
+        self.btn_extract_all.configure(state="disabled", text="Processando Lote...")
+        
+        # Inicia o processo em lote
+        self.vm.batch_extract_research_data(
+            row_ids, 
+            self.update_status_ui, 
+            self.on_error, 
+            self.load_research_data
+        )
+
+    def _safe_update_status(self, message):
+        """Executa a atualização real do status e botões."""
+        if not self.winfo_exists():
+            return
+            
+        self.status_label.configure(text=message)
+        msg_lower = message.lower()
+        
+        # Identifica conclusão para reabilitar botões
+        if any(kw in msg_lower for kw in ["finalizado", "finalizada", "processadas", "sucesso", "erro"]):
+            self.btn_scrape.configure(state="normal")
+            if hasattr(self, 'btn_extract_all'):
+                self.btn_extract_all.configure(state="normal", text="📥 Extrair Tudo para Pesquisas")
+            self.load_history_list()

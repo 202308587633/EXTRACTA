@@ -48,7 +48,7 @@ class MainViewModel:
                 if not url.strip():
                     raise ValueError("A URL de destino não pode estar vazia.")
 
-                engine = "BDTD" # Identificador fixo para o buscador principal
+                engine = "BDTD"
 
                 self._update_step(f"Baixando conteúdo da BDTD ({ano_selecionado})...", on_status_change)
                 
@@ -59,7 +59,6 @@ class MainViewModel:
                     raise Exception("Falha ao capturar o HTML da página inicial da BDTD.")
 
                 self._update_step("Persistindo busca no histórico...", on_status_change)
-                # Grava o termo amigável da Combobox em vez da URL longa
                 self.db.insert_scrape(
                     engine=engine,
                     termo=termo_amigavel,
@@ -68,7 +67,8 @@ class MainViewModel:
                     html_source=html,
                     link_busca=url
                 )
-                self._update_step(f"Captura de '{termo_amigavel}' finalizada!", on_status_change)
+                # Adicionada a palavra 'finalizado' para gatilho na View
+                self._update_step(f"Captura de '{termo_amigavel}' finalizada com sucesso!", on_status_change)
             except Exception as e:
                 erro_msg = str(e)
                 self.db.log_event(f"ERRO NO SCRAPE: {erro_msg}")
@@ -451,3 +451,58 @@ class MainViewModel:
         except Exception as e:
             self.db.log_event(f"Falha na visualização externa: {str(e)}")
             return False
+
+    def batch_extract_research_data(self, row_ids, on_status_change, on_error, callback_refresh):
+        """
+        Executa a extração de dados em lote para uma lista de IDs do histórico.
+        Processa sequencialmente para manter a integridade do SQLite.
+        """
+        def batch_task():
+            total = len(row_ids)
+            try:
+                for index, rowid in enumerate(row_ids, 1):
+                    self._update_step(f"Lote: Processando item {index} de {total}...", on_status_change)
+                    
+                    # Recupera detalhes (incluindo Termo e Ano amigáveis)
+                    record = self.db.get_scrape_full_details(rowid) 
+                    if record:
+                        # Reutiliza a lógica interna de processamento de HTML
+                        self._process_single_record_to_research(record, rowid)
+                
+                self._update_step(f"Lote finalizado: {total} capturas processadas.", on_status_change)
+                if callback_refresh:
+                    callback_refresh()
+            except Exception as e:
+                self.db.log_event(f"Erro no processamento em lote: {str(e)}")
+                if on_error: on_error(str(e))
+
+        threading.Thread(target=batch_task, daemon=True).start()
+
+    def _process_single_record_to_research(self, record, rowid):
+        """Lógica interna de extração isolada para suportar lote e unitário."""
+        # record: (engine, termo_orig, ano_orig, pagina, html)
+        termo_orig, ano_orig, html_content = record[1], record[2], record[4]
+        soup = BeautifulSoup(html_content, 'html.parser')
+        results = soup.select('.result.card-results')
+
+        extracted_to_db = []
+        for res in results:
+            title_tag = res.select_one('h2 a.title')
+            titulo = title_tag.get_text(strip=True) if title_tag else "-"
+            l_busc = title_tag['href'] if title_tag else "-"
+            if l_busc.startswith('/'): 
+                l_busc = "https://bdtd.ibict.br" + l_busc
+
+            autor = res.select_one('a[href*="/Author/"]').get_text(strip=True) if res.select_one('a[href*="/Author/"]') else "-"
+            repo_tag = res.find('a', string=lambda s: s and "Acessar documento" in s)
+            l_repo = repo_tag['href'] if repo_tag else "-"
+
+            # Monta a tupla com os 7 campos requeridos pelo db.insert_extracted_data
+            extracted_to_db.append((titulo, autor, l_busc, l_repo, rowid, termo_orig, ano_orig))
+
+        if extracted_to_db:
+            self.db.insert_extracted_data(extracted_to_db)
+
+
+###############################################
+
