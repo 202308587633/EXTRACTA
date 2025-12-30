@@ -16,13 +16,32 @@ class ResearchTab(ctk.CTkFrame):
         self.setup_ui()
 
     def setup_ui(self):
-        """Configura a aba de pesquisas com a Treeview estilizada (Dark Mode)."""
-        
-        # --- HARMONIZAÇÃO VISUAL (TEMA ESCURO) ---
+        self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.action_frame.pack(fill="x", padx=10, pady=(10, 5))
+
+        self.btn_process_all = ctk.CTkButton(
+            self.action_frame,
+            text="⚙️ Processar Metadados em Lote (Parsers)",
+            fg_color="#2b7a78",
+            hover_color="#17252a",
+            height=30,
+            command=self.trigger_batch_parser
+        )
+        self.btn_process_all.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        self.btn_refresh = ctk.CTkButton(
+            self.action_frame,
+            text="🔄 Recarregar Tabela",
+            fg_color="#555555",
+            height=30,
+            width=150,
+            command=self.load_research_data
+        )
+        self.btn_refresh.pack(side="right")
+
         style = ttk.Style()
         style.theme_use("default")
         
-        # Configura cores da tabela para combinar com o CustomTkinter
         style.configure("Treeview",
             background="#2b2b2b",
             foreground="white",
@@ -33,7 +52,6 @@ class ResearchTab(ctk.CTkFrame):
             
         style.map("Treeview", background=[('selected', '#1f6aa5')])
         
-        # Configura o cabeçalho
         style.configure("Treeview.Heading",
             background="#1a1a1a",
             foreground="silver",
@@ -41,12 +59,10 @@ class ResearchTab(ctk.CTkFrame):
             font=("Roboto", 10, "bold"))
             
         style.map("Treeview.Heading", background=[('active', '#252525')])
-        # -----------------------------------------
 
         self.res_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.res_container.pack(fill="both", expand=True, padx=10, pady=10)
+        self.res_container.pack(fill="both", expand=True, padx=10, pady=5)
         
-        # Definição das 10 colunas
         cols = ("titulo", "autor", "link_busc", "link_repo", "sigla", "univ", "prog", "pdf", "termo", "ano")
         self.tree = ttk.Treeview(self.res_container, columns=cols, show="headings")
         
@@ -58,11 +74,9 @@ class ResearchTab(ctk.CTkFrame):
         
         for col, text in headers.items():
             self.tree.heading(col, text=text, command=lambda c=col: self.sort_treeview(c, False))
-            # Ajuste de largura para colunas específicas
             width = 90 if col in ["termo", "ano", "sigla", "pdf"] else 120
             self.tree.column(col, width=width)
         
-        # Scrollbars
         vsb = ttk.Scrollbar(self.res_container, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(self.res_container, orient="horizontal", command=self.tree.xview)
         
@@ -75,7 +89,6 @@ class ResearchTab(ctk.CTkFrame):
         self.res_container.grid_rowconfigure(0, weight=1)
         self.res_container.grid_columnconfigure(0, weight=1)
         
-        # Menu de Contexto
         self.research_menu = tk.Menu(self, tearoff=0)
         self.tree.bind("<Button-3>", self.show_research_context_menu)
         
@@ -260,6 +273,30 @@ class ResearchTab(ctk.CTkFrame):
             processed_row = [str(val) if val and str(val).strip() != "" else "-" for val in record]
             # Atualiza os valores da linha existente na Treeview
             self.tree.item(item_iid, values=processed_row)
-                
-##################################
+              
+    def trigger_batch_extraction(self):
+        ids = self.vm.get_filtered_batch_ids()
+        
+        if not ids:
+            self.update_status_ui("Nenhum item encontrado para os domínios marcados na aba 'Raízes de URLs'.")
+            return
 
+        self.btn_batch_extract.configure(state="disabled", text=f"Processando {len(ids)} itens...")
+        
+        def on_finish():
+            self.after(0, lambda: self.btn_batch_extract.configure(state="normal", text="🚀 Extrair Dados de Todas as Pesquisas (Lote)"))
+            self.after(0, self.load_research_data)
+
+        self.vm.batch_extract_university_info(ids, self.update_status_ui, on_finish)
+
+    def trigger_batch_parser(self):
+        self.btn_process_all.configure(state="disabled", text="Processando...")
+        
+        self.vm.batch_extract_university_info(
+            on_status_change=self.update_status_ui,
+            callback_refresh=self.on_batch_finish
+        )
+
+    def on_batch_finish(self):
+        self.load_research_data()
+        self.after(0, lambda: self.btn_process_all.configure(state="normal", text="⚙️ Processar Metadados em Lote (Parsers)"))

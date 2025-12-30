@@ -220,7 +220,6 @@ class DatabaseHandler:
         return {row[0]: bool(row[1]) for row in cursor.fetchall()}
 
     def fetch_research_record(self, res_id):
-        """Retorna os dados de uma única pesquisa para atualização pontual na interface."""
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT titulo, autor, link_buscador, link_repositorio, 
@@ -230,3 +229,62 @@ class DatabaseHandler:
             WHERE id = ?
         """, (res_id,))
         return cursor.fetchone()
+
+    def get_all_research_ids(self):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id FROM pesquisas_extraidas ORDER BY id DESC")
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_all_research_data(self):
+        return self.fetch_extracted_data()
+
+    def save_html_buscador(self, rowid, html):
+        self.update_html_buscador(rowid, html)
+
+    def save_html_repositorio(self, rowid, html):
+        self.update_html_repositorio(rowid, html)
+
+    def update_research_extracted_data(self, res_id, sigla, univ, prog, pdf):
+        cursor = self.conn.cursor()
+        updates = []
+        params = []
+        
+        if sigla:
+            updates.append("sigla_univ = ?")
+            params.append(sigla)
+        if univ:
+            updates.append("nome_univ = ?")
+            params.append(univ)
+        if prog:
+            updates.append("programa = ?")
+            params.append(prog)
+        if pdf:
+            updates.append("link_pdf = ?")
+            params.append(pdf)
+            
+        if not updates:
+            return
+
+        params.append(res_id)
+        sql = f"UPDATE pesquisas_extraidas SET {', '.join(updates)} WHERE id = ?"
+        cursor.execute(sql, tuple(params))
+        self.conn.commit()
+
+    def get_research_links_and_ids(self):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, link_repositorio 
+            FROM pesquisas_extraidas 
+            WHERE html_repositorio IS NULL OR html_repositorio = ''
+            ORDER BY id DESC
+        """)
+        return cursor.fetchall()
+
+    def get_ids_with_stored_html(self):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id FROM pesquisas_extraidas 
+            WHERE (html_repositorio IS NOT NULL AND html_repositorio != '' AND html_repositorio != '-')
+               OR (html_buscador IS NOT NULL AND html_buscador != '' AND html_buscador != '-')
+        """)
+        return [row[0] for row in cursor.fetchall()]

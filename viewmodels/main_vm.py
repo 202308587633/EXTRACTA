@@ -176,25 +176,22 @@ class MainViewModel:
         threading.Thread(target=task, daemon=True).start()
 
     def get_research_results(self):
-        """Retorna os resultados da tabela de pesquisas processando agora as 10 colunas."""
-        return self.db.fetch_extracted_data()
+        return self.db.get_all_research_data()
 
-    def scrape_buscador_link(self, pesquisa_id, url, on_status_change, callback_display):
+    def scrape_buscador_link(self, res_id, url, on_status, callback_display):
         def task():
-            try:
-                self._update_step(f"Acessando buscador: {url[:40]}...", on_status_change)
-                scraper = WebScraper()
-                html = scraper.download_page(url, on_progress=on_status_change) # CORREÇÃO
-                if html:
-                    self.db.update_html_buscador(pesquisa_id, html)
-                    self._update_step("HTML do buscador salvo!", on_status_change)
-                    if callback_display: callback_display(html)
-            except Exception as e:
-                self._update_step(f"Erro: {str(e)}", on_status_change)
+            scraper = WebScraper()
+            html = scraper.download_page(url)
+            if html:
+                self.db.save_html_buscador(res_id, html)
+                on_status("HTML do Buscador salvo.")
+                if callback_display: callback_display(html)
+            else:
+                on_status("Falha ao baixar HTML do buscador.")
         threading.Thread(target=task, daemon=True).start()
 
-    def fetch_saved_html_buscador(self, pesquisa_id):
-        return self.db.get_html_buscador(pesquisa_id)
+    def fetch_saved_html_buscador(self, res_id):
+        return self.db.get_html_buscador(res_id)
 
     def preview_html_in_browser(self, pesquisa_id):
         """Busca o HTML no banco e abre no navegador via arquivo temporário."""
@@ -215,19 +212,16 @@ class MainViewModel:
         except Exception as e:
             return False, f"Erro ao abrir navegador: {str(e)}"
 
-    def scrape_repositorio_link(self, pesquisa_id, url, on_status_change, callback_display):
+    def scrape_repositorio_link(self, res_id, url, on_status, callback_display):
         def task():
-            try:
-                if not url or url == "-": return
-                self._update_step(f"Acessando Repositório: {url[:40]}...", on_status_change)
-                scraper = WebScraper()
-                html = scraper.download_page(url, on_progress=on_status_change) # CORREÇÃO (Fallback automático p/ Selenium)
-                if html:
-                    self.db.update_html_repositorio(pesquisa_id, html)
-                    self._update_step("HTML do repositório salvo!", on_status_change)
-                    if callback_display: callback_display(html)
-            except Exception as e:
-                self._update_step(f"Erro no repositório: {str(e)}", on_status_change)
+            scraper = WebScraper()
+            html = scraper.download_page(url)
+            if html:
+                self.db.save_html_repositorio(res_id, html)
+                on_status("HTML do Repositório salvo.")
+                if callback_display: callback_display(html)
+            else:
+                on_status("Falha ao baixar HTML do repositório.")
         threading.Thread(target=task, daemon=True).start()
         
     def preview_html_content_in_browser(self, html_content):
@@ -256,43 +250,14 @@ class MainViewModel:
             return False, msg_erro
         
     def extract_university_info(self, res_id, on_status_change, callback_refresh):
-        """Extração inteligente com suporte a 8 colunas e Link do PDF."""
         def task():
-            try:
-                cursor = self.db.conn.cursor()
-                cursor.execute("""
-                    SELECT link_buscador, html_buscador, link_repositorio, html_repositorio 
-                    FROM pesquisas_extraidas WHERE id=?
-                """, (res_id,))
-                row = cursor.fetchone()
-                
-                if not row: return
-
-                l_busc, h_busc, l_repo, h_repo = row
-                
-                # Escolhe a melhor fonte disponível
-                source_html = h_repo if h_repo else h_busc
-                active_link = l_repo if h_repo else l_busc
-
-                if not source_html:
-                    self._update_step("Erro: Nenhum HTML capturado. Faça o Scrap primeiro.", on_status_change)
-                    return
-
-                self._update_step(f"Iniciando Parser para {active_link[:30]}...", on_status_change)
-                parser = self.factory.get_parser(active_link, html_content=source_html)
-                # Extrai dados (Sigla, Nome, Programa, PDF)
-                details = parser.extract_pure_soup(source_html, active_link, on_progress=on_status_change)                
-                
-                # Salva no Banco (certifique-se que o db_handler tem a coluna link_pdf)
-                self.db.update_parser_data(res_id, details)
-                
-                self._update_step(f"Sucesso: {details.get('sigla')} processada.", on_status_change)
+            self._update_step("Iniciando Parser individual...", on_status_change)
+            if self._internal_extraction_logic(res_id):
+                self._update_step("Dados extraídos com sucesso.", on_status_change)
                 if callback_refresh: callback_refresh()
-
-            except Exception as e:
-                self.db.log_event(f"Erro na extração: {str(e)}")
-                self._update_step(f"Erro: {str(e)}", on_status_change)
-
+            else:
+                self._update_step("Falha na extração ou sem HTML.", on_status_change)
+        
         threading.Thread(target=task, daemon=True).start()
        
     def preview_pdf_in_browser(self, res_id):
@@ -342,35 +307,32 @@ class MainViewModel:
 
         threading.Thread(target=task, daemon=True).start()
 
-    def extract_from_search_engine(self, res_id, on_status_change, callback_refresh):
-        """
-        Acionada pelo menu de contexto. Extrai dados institucionais 
-        diretamente do HTML da BDTD salvo na Guia 4.
-        """
+    def extract_from_search_engine(self, res_id, on_status_change, on_refresh_callback):
         def task():
+            html = self.fetch_saved_html_buscador(res_id)
+            if not html:
+                on_status_change("HTML do buscador não disponível.")
+                return
+
             try:
-                html = self.db.get_html_buscador(res_id)
-                url = self.db.get_link_by_id(res_id) 
-
-                if not html:
-                    self._update_step("Erro: Faça o Scrap do Buscador primeiro.", on_status_change)
-                    return
-
-                self._update_step("BDTD: Analisando metadados institucional...", on_status_change)
+                from parsers.bdtd_parser import BDTDParser
+                parser = BDTDParser()
+                data = parser.extract_buscador_data(html)
                 
-                # A factory selecionará o BDTDParser (VuFind)
-                parser = self.factory.get_parser(url, html)
-                data = parser.extract_pure_soup(html, url)
-                
-                # Atualiza Sigla, Univ, Programa e Link PDF no banco
-                self.db.update_parser_data(res_id, data)
-                
-                self._update_step(f"Sucesso: {data.get('sigla')} identificado.", on_status_change)
-                if callback_refresh: callback_refresh()
-
+                if data:
+                    self.db.update_research_extracted_data(
+                        res_id,
+                        data.get('sigla'),
+                        data.get('universidade'),
+                        data.get('programa'),
+                        None 
+                    )
+                    on_status_change("Dados do buscador extraídos.")
+                    if on_refresh_callback: on_refresh_callback()
+                else:
+                    on_status_change("Nenhum dado novo encontrado no buscador.")
             except Exception as e:
-                self.db.log_event(f"Erro no parser do buscador: {str(e)}")
-                self._update_step(f"Falha: {str(e)}", on_status_change)
+                on_status_change(f"Erro ao extrair do buscador: {e}")
 
         threading.Thread(target=task, daemon=True).start()
 
@@ -410,25 +372,23 @@ class MainViewModel:
             self.db.log_event(f"Erro ao obter domínios: {e}")
             return []
 
-    def open_html_in_browser(self, res_id, source="buscador"):
-        """
-        Unifica a abertura de HTML do banco no navegador padrão (Chrome/Edge/etc).
-        Recupera o conteúdo da Guia 4 ou 5 e utiliza arquivo temporário seguro.
-        """
-        try:
-            html = self.db.get_html_buscador(res_id) if source == "buscador" else self.db.get_html_repositorio(res_id)
+    def open_html_in_browser(self, res_id, source_type):
+        html = ""
+        if source_type == "buscador":
+            html = self.fetch_saved_html_buscador(res_id)
+        else:
+            html = self.db.get_html_repositorio(res_id)
             
-            if not html:
-                self.db.log_event(f"Aviso: Conteúdo de {source} não disponível no banco para ID {res_id}.")
-                return False
+        if not html: return
 
-            # Usa o método interno de criação de arquivo temporário
-            self._open_temp_html(html, f"{source}_{res_id}")
-            self.db.log_event(f"Conteúdo de {source} aberto no navegador.")
-            return True
+        try:
+            with tempfile.NamedTemporaryFile('w', delete=False, suffix='.html', encoding='utf-8') as f:
+                f.write(html)
+                filepath = f.name
+            
+            webbrowser.open(f'file://{filepath}')
         except Exception as e:
-            self.db.log_event(f"Falha na visualização externa: {str(e)}")
-            return False
+            print(f"Erro ao abrir navegador: {e}")
 
     def batch_extract_research_data(self, row_ids, on_status_change, on_error, callback_refresh):
         """
@@ -537,5 +497,140 @@ class MainViewModel:
             time.sleep(1)
 
     def get_research_row(self, res_id):
-        """Retorna uma única linha formatada do banco de dados."""
         return self.db.fetch_research_record(res_id)
+
+    def batch_extract_university_info(self, on_status_change, callback_refresh):
+        def task():
+            try:
+                ids = self.db.get_ids_with_stored_html()
+                total = len(ids)
+                
+                if total == 0:
+                    self._update_step("Nenhum registro com HTML salvo encontrado para processar.", on_status_change)
+                    return
+
+                self._update_step(f"Iniciando processamento em lote de {total} registros...", on_status_change)
+                
+                success_count = 0
+                
+                for index, res_id in enumerate(ids, 1):
+                    if index % 5 == 0 or index == 1:
+                        self._update_step(f"Parser Lote: Processando {index}/{total}...", on_status_change)
+                    
+                    if self._internal_extraction_logic(res_id):
+                        success_count += 1
+                
+                self._update_step(f"Processamento finalizado! {success_count} registros atualizados.", on_status_change)
+                
+                if callback_refresh:
+                    callback_refresh()
+
+            except Exception as e:
+                self.db.log_event(f"Erro no Parser em Lote: {str(e)}")
+                self._update_step(f"Erro Crítico no Lote: {str(e)}", on_status_change)
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _sync_extract_university_info(self, res_id, on_status_change):
+        record = self.db.fetch_research_record(res_id)
+        if not record: return False
+        
+        link_buscador = record[2]
+        link_repo = record[3]
+        
+        scraper = WebScraper()
+        parser = None
+        html_content = None
+        base_url = None
+
+        if link_repo and link_repo != "-" and "http" in link_repo:
+            base_url = link_repo
+            parser = self.factory.get_parser(link_repo)
+        elif link_buscador and link_buscador != "-" and "http" in link_buscador:
+             pass
+        
+        if not parser or not base_url:
+            return False
+
+        saved_html = self.db.get_html_repositorio(res_id)
+        
+        if saved_html:
+            html_content = saved_html
+        else:
+            self._update_step(f"Baixando: {base_url[:40]}...", on_status_change)
+            html_content = scraper.download_page(base_url)
+            if html_content:
+                self.db.save_html_repositorio(res_id, html_content)
+
+        if not html_content:
+            return False
+
+        try:
+            if hasattr(parser, 'extract_repository_data'):
+                data = parser.extract_repository_data(html_content)
+                
+                self.db.update_research_extracted_data(
+                    res_id,
+                    data.get('sigla'),
+                    data.get('universidade'),
+                    data.get('programa'),
+                    data.get('link_pdf')
+                )
+                return True
+        except Exception as e:
+            self._update_step(f"Erro no parser: {str(e)}", on_status_change)
+            return False
+            
+        return False
+
+    def get_filtered_batch_ids(self):
+        states = self.db.get_domain_states()
+        if not states:
+            return []
+
+        active_domains = {dom for dom, active in states.items() if active}
+        
+        records = self.db.get_research_links_and_ids()
+        
+        filtered_ids = []
+        for res_id, link in records:
+            if not link or link == "-":
+                continue
+                
+            try:
+                domain = urlparse(link).netloc
+                if domain in active_domains:
+                    filtered_ids.append(res_id)
+            except Exception:
+                continue
+                
+        return filtered_ids
+
+    def _internal_extraction_logic(self, res_id):
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute("""
+                SELECT link_buscador, html_buscador, link_repositorio, html_repositorio 
+                FROM pesquisas_extraidas WHERE id=?
+            """, (res_id,))
+            row = cursor.fetchone()
+            
+            if not row: return False
+
+            l_busc, h_busc, l_repo, h_repo = row
+            
+            source_html = h_repo if (h_repo and len(h_repo) > 100) else h_busc
+            active_link = l_repo if (h_repo and len(h_repo) > 100) else l_busc
+
+            if not source_html: return False
+
+            parser = self.factory.get_parser(active_link, html_content=source_html)
+            
+            details = parser.extract_pure_soup(source_html, active_link)
+            
+            self.db.update_parser_data(res_id, details)
+            return True
+            
+        except Exception as e:
+            self.db.log_event(f"Falha ao processar ID {res_id}: {e}")
+            return False
