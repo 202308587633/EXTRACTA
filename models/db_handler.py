@@ -42,10 +42,10 @@ class DatabaseHandler:
         self.conn.close()
         
     def get_scrape_full_details(self, rowid):
-        """Recupera os detalhes completos do histórico para a extração inteligente."""
+        """Recupera os detalhes completos incluindo a URL original para possibilitar a paginação."""
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT engine, termo, ano, pagina, html_source 
+            SELECT engine, termo, ano, pagina, html_source, link_busca 
             FROM paginas_busca 
             WHERE rowid = ?
         """, (rowid,))

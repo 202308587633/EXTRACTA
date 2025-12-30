@@ -94,35 +94,13 @@ class MainViewModel:
             return html_content
 
     def process_pagination(self, rowid, on_status_change, callback_refresh):
+        """Refatorado para utilizar a lógica centralizada de paginação."""
         def task():
             try:
-                record = self.db.get_scrape_full_details(rowid)
-                if not record: return
-                engine, termo_original, ano, pagina_inicial, html_source = record
-                
-                matches = re.findall(r'page=(\d+)', html_source)
-                if not matches: return
-                max_page = max(map(int, matches))
-
-                parsed_url = urlparse(termo_original)
-                query_params = parse_qs(parsed_url.query)
-                scraper = WebScraper() # Instancia uma vez para o loop
-
-                for p in range(2, max_page + 1):
-                    self._update_step(f"Capturando página {p} de {max_page}...", on_status_change)
-                    query_params['page'] = [str(p)]
-                    new_query = urlencode(query_params, doseq=True)
-                    new_url = urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, 
-                                          parsed_url.params, new_query, parsed_url.fragment))
-                    
-                    # CORREÇÃO: Usa download_page do scraper instanciado
-                    new_html = scraper.download_page(new_url, on_progress=on_status_change)
-                    if new_html:
-                        self.db.insert_scrape(engine, termo_original, ano, p, new_html, new_url)
-                    time.sleep(1)
-
-                self._update_step(f"Ciclo finalizado.", on_status_change)
-                if callback_refresh: callback_refresh()
+                self._internal_pagination_logic(rowid, on_status_change)
+                self._update_step("Paginação individual finalizada.", on_status_change)
+                if callback_refresh: 
+                    callback_refresh()
             except Exception as e:
                 self._update_step(f"Erro na paginação: {str(e)}", on_status_change)
 
@@ -503,6 +481,57 @@ class MainViewModel:
         if extracted_to_db:
             self.db.insert_extracted_data(extracted_to_db)
 
+    def batch_process_pagination(self, row_ids, on_status_change, callback_refresh):
+        """
+        Executa a busca de todas as páginas para uma lista de registros (Lote).
+        Processa sequencialmente para evitar bloqueios do servidor.
+        """
+        def batch_task():
+            total = len(row_ids)
+            try:
+                for index, rid in enumerate(row_ids, 1):
+                    self._update_step(f"Lote Paginação: Expandindo item {index} de {total}...", on_status_change)
+                    # Executa a lógica de forma síncrona dentro da thread do lote
+                    self._internal_pagination_logic(rid, on_status_change)
+                
+                self._update_step(f"Paginação em lote finalizada! {total} buscas processadas.", on_status_change)
+                if callback_refresh:
+                    # O CustomTkinter gerencia a atualização da lista
+                    callback_refresh()
+            except Exception as e:
+                self.db.log_event(f"Erro no processamento em lote: {str(e)}")
 
-###############################################
+        threading.Thread(target=batch_task, daemon=True).start()
 
+    def _internal_pagination_logic(self, rowid, on_status_change):
+        """Lógica central de paginação para reuso (Individual e Lote)."""
+        record = self.db.get_scrape_full_details(rowid)
+        if not record: return
+        
+        # Agora record possui 6 campos: (engine, termo, ano, pagina, html, link_busca)
+        engine, termo_orig, ano, pagina_inicial, html_source, link_original = record
+        
+        # Encontra o total de páginas no HTML da página 1
+        matches = re.findall(r'page=(\d+)', html_source)
+        if not matches: return
+        max_page = max(map(int, matches))
+
+        # Usa a URL de busca salva no banco para montar os links das próximas páginas
+        parsed_url = urlparse(link_original)
+        query_params = parse_qs(parsed_url.query)
+        scraper = WebScraper()
+
+        for p in range(2, max_page + 1):
+            self._update_step(f"Capturando página {p} de {max_page}...", on_status_change)
+            query_params['page'] = [str(p)]
+            new_query = urlencode(query_params, doseq=True)
+            new_url = urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, 
+                                  parsed_url.params, new_query, parsed_url.fragment))
+            
+            # Baixa e insere no histórico
+            new_html = scraper.download_page(new_url, on_progress=on_status_change)
+            if new_html:
+                self.db.insert_scrape(engine, termo_orig, ano, p, new_html, new_url)
+            
+            # Intervalo de segurança contra bloqueios (Bot protection)
+            time.sleep(1)

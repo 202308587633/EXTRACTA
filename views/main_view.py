@@ -76,7 +76,7 @@ class MainView(ctk.CTk):
         self.status_label.pack(pady=5)
 
     def _setup_history_tab(self):
-        """Configura a aba Histórico com o novo botão de extração em lote."""
+        """Configura a aba Histórico com o novo botão de paginação em lote."""
         self.history_container = ctk.CTkFrame(self.tab_data)
         self.history_container.pack(fill="both", expand=True, padx=5, pady=5)
         
@@ -93,7 +93,6 @@ class MainView(ctk.CTk):
         self.btn_refresh = ctk.CTkButton(self.action_frame, text="🔄 Atualizar Lista", command=self.load_history_list, height=28)
         self.btn_refresh.pack(side="left", fill="x", expand=True, padx=2)
 
-        # NOVO BOTÃO: Executa a extração para todas as páginas listadas
         self.btn_extract_all = ctk.CTkButton(
             self.action_frame, 
             text="📥 Extrair Tudo para Pesquisas", 
@@ -102,6 +101,16 @@ class MainView(ctk.CTk):
             height=28
         )
         self.btn_extract_all.pack(side="left", fill="x", expand=True, padx=2)
+
+        # NOVO BOTÃO: Busca todas as páginas para todos os itens que sejam 'Página 1'
+        self.btn_paginate_all = ctk.CTkButton(
+            self.action_frame, 
+            text="🔍 Buscar Todas Páginas (Lote)", 
+            fg_color="#8B0000", # DarkRed para destaque
+            command=self.trigger_batch_pagination,
+            height=28
+        )
+        self.btn_paginate_all.pack(side="left", fill="x", expand=True, padx=2)
 
         self.txt_content = ctk.CTkTextbox(self.content_frame, wrap="word", font=("Consolas", 12))
         self.txt_content.pack(fill="both", expand=True, padx=5, pady=5)
@@ -465,7 +474,7 @@ class MainView(ctk.CTk):
         )
 
     def _safe_update_status(self, message):
-        """Executa a atualização real do status e botões."""
+        """Executa a atualização real do status e reabilita todos os botões de lote."""
         if not self.winfo_exists():
             return
             
@@ -473,8 +482,39 @@ class MainView(ctk.CTk):
         msg_lower = message.lower()
         
         # Identifica conclusão para reabilitar botões
-        if any(kw in msg_lower for kw in ["finalizado", "finalizada", "processadas", "sucesso", "erro"]):
+        concluido = any(kw in msg_lower for kw in ["finalizado", "finalizada", "processadas", "sucesso", "erro", "expandidas"])
+        
+        if concluido:
             self.btn_scrape.configure(state="normal")
+            
             if hasattr(self, 'btn_extract_all'):
                 self.btn_extract_all.configure(state="normal", text="📥 Extrair Tudo para Pesquisas")
+            
+            if hasattr(self, 'btn_paginate_all'):
+                self.btn_paginate_all.configure(state="normal", text="🔍 Buscar Todas Páginas (Lote)")
+                
             self.load_history_list()
+
+    def trigger_batch_pagination(self):
+        """Identifica capturas de Página 1 e inicia a paginação automática em lote via ViewModel."""
+        data = self.vm.get_history() # rowid, termo, data, html, pagina
+        if not data:
+            self.on_error("Nenhuma captura disponível no histórico.")
+            return
+
+        # Filtra apenas registros que são a página 1 (pois a paginação parte dela)
+        target_ids = [row[0] for row in data if row[4] == 1]
+        
+        if not target_ids:
+            self.on_error("Nenhuma 'Página 1' encontrada para expandir.")
+            return
+
+        self.btn_paginate_all.configure(state="disabled", text="Paginando...")
+        
+        # Chama o método de lote criado na ViewModel
+        self.vm.batch_process_pagination(
+            target_ids, 
+            self.update_status_ui, 
+            self.load_history_list
+        )
+
