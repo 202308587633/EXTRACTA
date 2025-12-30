@@ -642,3 +642,14 @@ class MainViewModel:
         except Exception as e:
             self.db.log_event(f"Erro ao filtrar pesquisas: {str(e)}")
             return []
+
+    def delete_record(self, rowid, termo, callback_refresh):
+        """Exclui um registro do histórico e atualiza a interface."""
+        try:
+            self.db.delete_scrape(rowid)
+            self.db.log_event(f"Registro '{termo}' (ID {rowid}) excluído.")
+            if callback_refresh:
+                callback_refresh()
+        except Exception as e:
+            self.db.log_event(f"Erro ao excluir registro ID {rowid}: {str(e)}")
+    
